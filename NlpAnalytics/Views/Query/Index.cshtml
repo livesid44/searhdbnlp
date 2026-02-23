@@ -1,0 +1,107 @@
+@model NlpAnalytics.Models.QueryRequest
+@{
+    ViewData["Title"] = "Analytics Query";
+}
+
+<div class="container mt-4">
+    <div class="row justify-content-center">
+        <div class="col-lg-10">
+            <div class="card shadow-sm border-0 mb-4">
+                <div class="card-body p-4">
+                    <div class="d-flex align-items-center mb-3">
+                        <span class="me-3 fs-1">🔍</span>
+                        <div>
+                            <h1 class="h3 mb-0 fw-bold">NLP Analytics Platform</h1>
+                            <p class="text-muted mb-0">Ask any question about your data in plain English</p>
+                        </div>
+                    </div>
+
+                    <form asp-controller="Query" asp-action="Execute" method="post" id="queryForm">
+                        @Html.AntiForgeryToken()
+                        <div class="mb-3">
+                            <label asp-for="NaturalLanguageQuery" class="form-label fw-semibold">
+                                What would you like to know?
+                            </label>
+                            <div class="input-group input-group-lg">
+                                <span class="input-group-text bg-white"><i class="bi bi-chat-left-text">💬</i></span>
+                                <input asp-for="NaturalLanguageQuery"
+                                       class="form-control form-control-lg"
+                                       placeholder="e.g. Show me total sales by region for last month"
+                                       autofocus />
+                                <button type="submit" class="btn btn-primary px-4" id="submitBtn">
+                                    <span id="submitText">Analyse</span>
+                                    <span id="submitSpinner" class="spinner-border spinner-border-sm ms-1 d-none" role="status"></span>
+                                </button>
+                            </div>
+                            <span asp-validation-for="NaturalLanguageQuery" class="text-danger small"></span>
+                        </div>
+
+                        <div class="row g-2 mt-1">
+                            <p class="text-muted small mb-1">Try asking:</p>
+                            @foreach (var suggestion in new[]
+                            {
+                                "Show me the top 10 customers by revenue",
+                                "What are the total sales per month this year?",
+                                "List all products with stock below 50 units",
+                                "Which region has the highest number of orders?"
+                            })
+                            {
+                                <div class="col-auto">
+                                    <button type="button" class="btn btn-outline-secondary btn-sm suggestion-btn"
+                                            data-value="@suggestion">@suggestion</button>
+                                </div>
+                            }
+                        </div>
+                    </form>
+                </div>
+            </div>
+
+            <div class="row text-center g-3">
+                <div class="col-md-4">
+                    <div class="card h-100 border-0 bg-light">
+                        <div class="card-body">
+                            <div class="fs-2 mb-2">🤖</div>
+                            <h6 class="fw-bold">AI-Powered</h6>
+                            <p class="text-muted small mb-0">Azure OpenAI translates your question into optimised T-SQL</p>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-4">
+                    <div class="card h-100 border-0 bg-light">
+                        <div class="card-body">
+                            <div class="fs-2 mb-2">🗄️</div>
+                            <h6 class="fw-bold">Live Database</h6>
+                            <p class="text-muted small mb-0">Queries run directly against your MSSQL database in real time</p>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-4">
+                    <div class="card h-100 border-0 bg-light">
+                        <div class="card-body">
+                            <div class="fs-2 mb-2">📊</div>
+                            <h6 class="fw-bold">Visual Insights</h6>
+                            <p class="text-muted small mb-0">Results displayed as interactive tables and charts</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+@section Scripts {
+    <partial name="_ValidationScriptsPartial" />
+    <script>
+        document.getElementById('queryForm').addEventListener('submit', function () {
+            document.getElementById('submitText').textContent = 'Analysing\u2026';
+            document.getElementById('submitSpinner').classList.remove('d-none');
+            document.getElementById('submitBtn').disabled = true;
+        });
+
+        document.querySelectorAll('.suggestion-btn').forEach(function (btn) {
+            btn.addEventListener('click', function () {
+                document.getElementById('NaturalLanguageQuery').value = this.dataset.value;
+            });
+        });
+    </script>
+}

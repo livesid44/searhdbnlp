@@ -1,0 +1,198 @@
+@model NlpAnalytics.Models.QueryResult
+@using Newtonsoft.Json
+@using Newtonsoft.Json.Serialization
+@{
+    ViewData["Title"] = "Query Results";
+    var camelCase = new JsonSerializerSettings { ContractResolver = new CamelCasePropertyNamesContractResolver() };
+    var chartJson = Model.ChartData != null ? JsonConvert.SerializeObject(Model.ChartData, camelCase) : "null";
+}
+
+<div class="container mt-4">
+    <div class="row justify-content-center">
+        <div class="col-lg-11">
+
+            @* Back / question header  *@
+            <div class="d-flex align-items-center gap-2 mb-3">
+                <a asp-controller="Query" asp-action="Index" class="btn btn-outline-secondary btn-sm">
+                    ← New Query
+                </a>
+                <h5 class="mb-0 text-muted fst-italic">"@Model.NaturalLanguageQuery"</h5>
+            </div>
+
+            @if (Model.HasError)
+            {
+                <div class="alert alert-danger d-flex align-items-start gap-2" role="alert">
+                    <span class="fs-5">⚠️</span>
+                    <div>
+                        <strong>Error</strong><br />@Model.ErrorMessage
+                    </div>
+                </div>
+            }
+
+            @if (!string.IsNullOrWhiteSpace(Model.Interpretation))
+            {
+                <div class="alert alert-info d-flex align-items-start gap-2" role="alert">
+                    <span class="fs-5">💡</span>
+                    <div>
+                        <strong>Interpretation:</strong> @Model.Interpretation
+                    </div>
+                </div>
+            }
+
+            @if (!string.IsNullOrWhiteSpace(Model.GeneratedSql))
+            {
+                <div class="card border-0 shadow-sm mb-4">
+                    <div class="card-header bg-dark text-white d-flex justify-content-between align-items-center">
+                        <span>📝 Generated SQL</span>
+                        <button class="btn btn-sm btn-outline-light" id="copySqlBtn" onclick="copyToClipboard()">Copy</button>
+                    </div>
+                    <div class="card-body p-0">
+                        <pre id="sqlCode" class="m-0 p-3 bg-dark text-success" style="overflow-x:auto;"><code>@Model.GeneratedSql</code></pre>
+                    </div>
+                </div>
+            }
+
+            @if (Model.HasData)
+            {
+                <div class="d-flex justify-content-between align-items-center mb-2">
+                    <h6 class="mb-0">📋 Results — <span class="badge bg-secondary">@Model.RowCount row@(Model.RowCount == 1 ? "" : "s")</span></h6>
+                    @if (Model.ChartData != null)
+                    {
+                        <div class="btn-group btn-group-sm" role="group">
+                            <button class="btn btn-primary active" id="btnTable" onclick="showView('table')">Table</button>
+                            <button class="btn btn-outline-primary" id="btnChart" onclick="showView('chart')">Chart</button>
+                        </div>
+                    }
+                </div>
+
+                @* Table View  *@
+                <div id="tableView" class="card border-0 shadow-sm mb-4">
+                    <div class="card-body p-0">
+                        <div class="table-responsive">
+                            <table class="table table-hover table-bordered table-sm mb-0" id="resultsTable">
+                                <thead class="table-dark">
+                                    <tr>
+                                        @foreach (var col in Model.Columns)
+                                        {
+                                            <th>@col</th>
+                                        }
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @foreach (var row in Model.Rows)
+                                    {
+                                        <tr>
+                                            @foreach (var cell in row)
+                                            {
+                                                <td>@(cell?.ToString() ?? "<null>")</td>
+                                            }
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+
+                @if (Model.ChartData != null)
+                {
+                    @* Chart View  *@
+                    <div id="chartView" class="card border-0 shadow-sm mb-4 d-none">
+                        <div class="card-body">
+                            <div class="d-flex justify-content-end gap-2 mb-2">
+                                <label class="form-label mb-0 align-self-center small text-muted">Chart type:</label>
+                                <select class="form-select form-select-sm w-auto" id="chartTypeSelect" onchange="updateChartType(this.value)">
+                                    <option value="bar" selected="@(Model.ChartData.ChartType == "bar" ? "selected" : null)">Bar</option>
+                                    <option value="line" selected="@(Model.ChartData.ChartType == "line" ? "selected" : null)">Line</option>
+                                    <option value="pie" selected="@(Model.ChartData.ChartType == "pie" ? "selected" : null)">Pie</option>
+                                    <option value="doughnut" selected="@(Model.ChartData.ChartType == "doughnut" ? "selected" : null)">Doughnut</option>
+                                </select>
+                            </div>
+                            <div style="position:relative; height:400px;">
+                                <canvas id="analyticsChart"></canvas>
+                            </div>
+                        </div>
+                    </div>
+                }
+            }
+            else if (!Model.HasError)
+            {
+                <div class="alert alert-warning" role="alert">
+                    ℹ️ The query returned no results.
+                </div>
+            }
+
+        </div>
+    </div>
+</div>
+
+@section Scripts {
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"
+            integrity="sha256-oVuCFnNfBb5ZqSt6V7O7xBP9bgHFABSvDOzO0QZCZJo="
+            crossorigin="anonymous"></script>
+    <script>
+        // --- chart setup ---
+        var chartData = @Html.Raw(chartJson);
+        var myChart = null;
+
+        function buildChart(type) {
+            if (!chartData) return;
+            var ctx = document.getElementById('analyticsChart').getContext('2d');
+            if (myChart) myChart.destroy();
+
+            var isPieFamily = type === 'pie' || type === 'doughnut';
+            var datasets = chartData.datasets.map(function (ds) {
+                return {
+                    label: ds.label,
+                    data: ds.data,
+                    backgroundColor: isPieFamily ? ds.backgroundColor : ds.backgroundColor[0],
+                    borderColor: ds.borderColor,
+                    borderWidth: ds.borderWidth,
+                    fill: false
+                };
+            });
+
+            myChart = new Chart(ctx, {
+                type: type,
+                data: { labels: chartData.labels, datasets: datasets },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: { legend: { position: 'top' } }
+                }
+            });
+        }
+
+        function updateChartType(type) {
+            buildChart(type);
+        }
+
+        function showView(view) {
+            if (view === 'table') {
+                document.getElementById('tableView').classList.remove('d-none');
+                document.getElementById('chartView').classList.add('d-none');
+                document.getElementById('btnTable').classList.add('active');
+                document.getElementById('btnTable').classList.replace('btn-outline-primary', 'btn-primary');
+                document.getElementById('btnChart').classList.remove('active');
+                document.getElementById('btnChart').classList.replace('btn-primary', 'btn-outline-primary');
+            } else {
+                document.getElementById('tableView').classList.add('d-none');
+                document.getElementById('chartView').classList.remove('d-none');
+                document.getElementById('btnChart').classList.add('active');
+                document.getElementById('btnChart').classList.replace('btn-outline-primary', 'btn-primary');
+                document.getElementById('btnTable').classList.remove('active');
+                document.getElementById('btnTable').classList.replace('btn-primary', 'btn-outline-primary');
+                if (!myChart) buildChart(chartData ? chartData.chartType : 'bar');
+            }
+        }
+
+        function copyToClipboard() {
+            var code = document.getElementById('sqlCode').innerText;
+            navigator.clipboard.writeText(code).then(function () {
+                var btn = document.getElementById('copySqlBtn');
+                btn.textContent = 'Copied!';
+                setTimeout(function () { btn.textContent = 'Copy'; }, 2000);
+            });
+        }
+    </script>
+}
