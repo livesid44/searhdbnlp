@@ -86,6 +86,30 @@ public class SqlServerSchemaService : ISchemaService
 
         schema.Tables = tableDict.Values.ToList();
         _logger.LogInformation("Schema loaded: {Count} tables from {Database}", schema.Tables.Count, schema.DatabaseName);
+
+        // Populate sample rows so the AI knows actual data values (e.g. "Met"/"Not Met" for a Status column).
+        // Limit to first 30 tables to avoid excessive startup time on very large databases.
+        foreach (var table in schema.Tables.Take(30))
+        {
+            try
+            {
+                var sampleSql = $"SELECT TOP 5 * FROM {table.FullName}";
+                await using var cmd = new SqlCommand(sampleSql, conn) { CommandTimeout = 10 };
+                await using var reader = await cmd.ExecuteReaderAsync();
+                while (await reader.ReadAsync())
+                {
+                    var row = new string[reader.FieldCount];
+                    for (var i = 0; i < reader.FieldCount; i++)
+                        row[i] = reader.IsDBNull(i) ? "NULL" : Convert.ToString(reader.GetValue(i)) ?? "NULL";
+                    table.SampleRows.Add(row);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning("Could not sample table {Table}: {Message}", table.FullName, ex.Message);
+            }
+        }
+
         return schema;
     }
 }

@@ -57,6 +57,21 @@ public class QueryController : Controller
 
             var result = await _databaseService.ExecuteQueryAsync(sql, request.NaturalLanguageQuery);
             result.Interpretation = interpretation;
+
+            // Generate AI insights on the returned data
+            if (result.HasData && !result.HasError)
+            {
+                try
+                {
+                    result.AiInsights = await _queryGenerator.GenerateInsightsAsync(
+                        request.NaturalLanguageQuery, result.Columns, result.Rows);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Could not generate AI insights; continuing without them.");
+                }
+            }
+
             return View("Result", result);
         }
         catch (Exception ex)

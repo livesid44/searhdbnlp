@@ -5,13 +5,26 @@
     ViewData["Title"] = "Query Results";
     var camelCase = new JsonSerializerSettings { ContractResolver = new CamelCasePropertyNamesContractResolver() };
     var chartJson = Model.ChartData != null ? JsonConvert.SerializeObject(Model.ChartData, camelCase) : "null";
+    // Identify pivot dimensions for the JS pivot engine
+    var pivotRowColIdx = 0;
+    var pivotColColIdx = 1;
+    var pivotValColIdx = 2;
+    if (Model.IsPivotable && Model.ColumnTypes.Count >= 3)
+    {
+        var stringIdxs = Model.ColumnTypes.Select((t, i) => (t, i)).Where(x => x.t == typeof(string)).Select(x => x.i).ToList();
+        var numIdx = Model.ColumnTypes.Select((t, i) => (t, i))
+            .FirstOrDefault(x => new HashSet<Type> { typeof(int), typeof(long), typeof(short), typeof(byte),
+                typeof(float), typeof(double), typeof(decimal) }.Contains(x.t)).i;
+        if (stringIdxs.Count >= 2) { pivotRowColIdx = stringIdxs[0]; pivotColColIdx = stringIdxs[1]; }
+        pivotValColIdx = numIdx;
+    }
 }
 
 <div class="container mt-4">
     <div class="row justify-content-center">
         <div class="col-lg-11">
 
-            @* Back / question header  *@
+            @* Back / question header *@
             <div class="d-flex align-items-center gap-2 mb-3">
                 <a asp-controller="Query" asp-action="Index" class="btn btn-outline-secondary btn-sm">
                     ← New Query
@@ -39,6 +52,18 @@
                 </div>
             }
 
+            @if (!string.IsNullOrWhiteSpace(Model.AiInsights))
+            {
+                <div class="card border-0 shadow-sm mb-4">
+                    <div class="card-header fw-semibold bg-primary text-white">
+                        🤖 AI Insights
+                    </div>
+                    <div class="card-body">
+                        <div id="insightsContent" style="white-space:pre-line;">@Model.AiInsights</div>
+                    </div>
+                </div>
+            }
+
             @if (!string.IsNullOrWhiteSpace(Model.GeneratedSql))
             {
                 <div class="card border-0 shadow-sm mb-4">
@@ -56,16 +81,20 @@
             {
                 <div class="d-flex justify-content-between align-items-center mb-2">
                     <h6 class="mb-0">📋 Results — <span class="badge bg-secondary">@Model.RowCount row@(Model.RowCount == 1 ? "" : "s")</span></h6>
-                    @if (Model.ChartData != null)
-                    {
-                        <div class="btn-group btn-group-sm" role="group">
-                            <button class="btn btn-primary active" id="btnTable" onclick="showView('table')">Table</button>
+                    <div class="btn-group btn-group-sm" role="group">
+                        <button class="btn btn-primary active" id="btnTable" onclick="showView('table')">Table</button>
+                        @if (Model.ChartData != null)
+                        {
                             <button class="btn btn-outline-primary" id="btnChart" onclick="showView('chart')">Chart</button>
-                        </div>
-                    }
+                        }
+                        @if (Model.IsPivotable)
+                        {
+                            <button class="btn btn-outline-primary" id="btnPivot" onclick="showView('pivot')">Pivot</button>
+                        }
+                    </div>
                 </div>
 
-                @* Table View  *@
+                @* Table View *@
                 <div id="tableView" class="card border-0 shadow-sm mb-4">
                     <div class="card-body p-0">
                         <div class="table-responsive">
@@ -96,7 +125,7 @@
 
                 @if (Model.ChartData != null)
                 {
-                    @* Chart View  *@
+                    @* Chart View *@
                     <div id="chartView" class="card border-0 shadow-sm mb-4 d-none">
                         <div class="card-body">
                             <div class="d-flex justify-content-end gap-2 mb-2">
@@ -111,6 +140,42 @@
                             <div style="position:relative; height:400px;">
                                 <canvas id="analyticsChart"></canvas>
                             </div>
+                        </div>
+                    </div>
+                }
+
+                @if (Model.IsPivotable)
+                {
+                    @* Pivot Table View *@
+                    <div id="pivotView" class="card border-0 shadow-sm mb-4 d-none">
+                        <div class="card-header d-flex align-items-center gap-3">
+                            <span class="fw-semibold">🔄 Pivot Table</span>
+                            <div class="ms-auto d-flex gap-2 align-items-center small">
+                                <label class="mb-0 text-muted">Row:</label>
+                                <select id="pivotRowSel" class="form-select form-select-sm w-auto" onchange="renderPivot()">
+                                    @for (var i = 0; i < Model.Columns.Count; i++)
+                                    {
+                                        <option value="@i" selected="@(i == pivotRowColIdx ? "selected" : null)">@Model.Columns[i]</option>
+                                    }
+                                </select>
+                                <label class="mb-0 text-muted">Column:</label>
+                                <select id="pivotColSel" class="form-select form-select-sm w-auto" onchange="renderPivot()">
+                                    @for (var i = 0; i < Model.Columns.Count; i++)
+                                    {
+                                        <option value="@i" selected="@(i == pivotColColIdx ? "selected" : null)">@Model.Columns[i]</option>
+                                    }
+                                </select>
+                                <label class="mb-0 text-muted">Value:</label>
+                                <select id="pivotValSel" class="form-select form-select-sm w-auto" onchange="renderPivot()">
+                                    @for (var i = 0; i < Model.Columns.Count; i++)
+                                    {
+                                        <option value="@i" selected="@(i == pivotValColIdx ? "selected" : null)">@Model.Columns[i]</option>
+                                    }
+                                </select>
+                            </div>
+                        </div>
+                        <div class="card-body p-0">
+                            <div class="table-responsive" id="pivotContainer"></div>
                         </div>
                     </div>
                 }
@@ -131,7 +196,7 @@
             integrity="sha256-oVuCFnNfBb5ZqSt6V7O7xBP9bgHFABSvDOzO0QZCZJo="
             crossorigin="anonymous"></script>
     <script>
-        // --- chart setup ---
+        // ── Chart setup ──────────────────────────────────────────────────────────
         var chartData = @Html.Raw(chartJson);
         var myChart = null;
 
@@ -141,11 +206,19 @@
             if (myChart) myChart.destroy();
 
             var isPieFamily = type === 'pie' || type === 'doughnut';
-            var datasets = chartData.datasets.map(function (ds) {
+            var numDatasets = chartData.datasets.length;
+
+            var datasets = chartData.datasets.map(function (ds, dsIdx) {
+                // Pie/doughnut: one colour per slice (full array).
+                // Single-dataset bar: one colour per bar (full array for rainbow bars).
+                // Multi-dataset bar/line: one solid colour per dataset.
+                var bg = (isPieFamily || numDatasets === 1)
+                    ? ds.backgroundColor
+                    : ds.backgroundColor[dsIdx % ds.backgroundColor.length];
                 return {
                     label: ds.label,
                     data: ds.data,
-                    backgroundColor: isPieFamily ? ds.backgroundColor : ds.backgroundColor[0],
+                    backgroundColor: bg,
                     borderColor: ds.borderColor,
                     borderWidth: ds.borderWidth,
                     fill: false
@@ -167,25 +240,85 @@
             buildChart(type);
         }
 
+        // ── Raw data for pivot ───────────────────────────────────────────────────
+        var rawRows = @Html.Raw(JsonConvert.SerializeObject(
+            Model.Rows.Select(r => r.Select(v => v?.ToString()).ToList()).ToList()));
+
+        // ── View switching ───────────────────────────────────────────────────────
+        var VIEWS = ['table', 'chart', 'pivot'];
+
         function showView(view) {
-            if (view === 'table') {
-                document.getElementById('tableView').classList.remove('d-none');
-                document.getElementById('chartView').classList.add('d-none');
-                document.getElementById('btnTable').classList.add('active');
-                document.getElementById('btnTable').classList.replace('btn-outline-primary', 'btn-primary');
-                document.getElementById('btnChart').classList.remove('active');
-                document.getElementById('btnChart').classList.replace('btn-primary', 'btn-outline-primary');
-            } else {
-                document.getElementById('tableView').classList.add('d-none');
-                document.getElementById('chartView').classList.remove('d-none');
-                document.getElementById('btnChart').classList.add('active');
-                document.getElementById('btnChart').classList.replace('btn-outline-primary', 'btn-primary');
-                document.getElementById('btnTable').classList.remove('active');
-                document.getElementById('btnTable').classList.replace('btn-primary', 'btn-outline-primary');
-                if (!myChart) buildChart(chartData ? chartData.chartType : 'bar');
+            VIEWS.forEach(function(v) {
+                var el = document.getElementById(v + 'View');
+                var btn = document.getElementById('btn' + v.charAt(0).toUpperCase() + v.slice(1));
+                if (!el) return;
+                el.classList.toggle('d-none', v !== view);
+                if (btn) {
+                    btn.classList.toggle('active', v === view);
+                    btn.classList.toggle('btn-primary', v === view);
+                    btn.classList.toggle('btn-outline-primary', v !== view);
+                }
+            });
+
+            if (view === 'chart' && !myChart && chartData) {
+                buildChart(chartData.chartType);
+            }
+            if (view === 'pivot') {
+                renderPivot();
             }
         }
 
+        // ── Pivot table renderer ─────────────────────────────────────────────────
+        function renderPivot() {
+            var rowColIdx = parseInt(document.getElementById('pivotRowSel').value);
+            var colColIdx = parseInt(document.getElementById('pivotColSel').value);
+            var valColIdx = parseInt(document.getElementById('pivotValSel').value);
+
+            // Collect unique row/col keys
+            var rowKeys = [], colKeys = [], seen = {r: {}, c: {}};
+            rawRows.forEach(function(row) {
+                var rk = row[rowColIdx] || '(null)', ck = row[colColIdx] || '(null)';
+                if (!seen.r[rk]) { seen.r[rk] = true; rowKeys.push(rk); }
+                if (!seen.c[ck]) { seen.c[ck] = true; colKeys.push(ck); }
+            });
+
+            // Build lookup: rowKey → colKey → value (last wins / sum if numeric)
+            var matrix = {};
+            rawRows.forEach(function(row) {
+                var rk = row[rowColIdx] || '(null)';
+                var ck = row[colColIdx] || '(null)';
+                var v = row[valColIdx];
+                if (!matrix[rk]) matrix[rk] = {};
+                var existing = matrix[rk][ck];
+                var num = parseFloat(v);
+                if (!isNaN(num) && existing !== undefined) {
+                    matrix[rk][ck] = (parseFloat(existing) || 0) + num;
+                } else {
+                    matrix[rk][ck] = v !== null ? v : '';
+                }
+            });
+
+            // Render HTML table
+            var html = '<table class="table table-bordered table-sm table-hover mb-0"><thead class="table-dark"><tr><th></th>';
+            colKeys.forEach(function(ck) { html += '<th>' + esc(ck) + '</th>'; });
+            html += '</tr></thead><tbody>';
+            rowKeys.forEach(function(rk) {
+                html += '<tr><th class="table-secondary">' + esc(rk) + '</th>';
+                colKeys.forEach(function(ck) {
+                    var val = (matrix[rk] && matrix[rk][ck] !== undefined) ? matrix[rk][ck] : '—';
+                    html += '<td>' + esc(String(val)) + '</td>';
+                });
+                html += '</tr>';
+            });
+            html += '</tbody></table>';
+            document.getElementById('pivotContainer').innerHTML = html;
+        }
+
+        function esc(s) {
+            return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+        }
+
+        // ── Copy SQL ─────────────────────────────────────────────────────────────
         function copyToClipboard() {
             var code = document.getElementById('sqlCode').innerText;
             navigator.clipboard.writeText(code).then(function () {

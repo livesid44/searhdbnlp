@@ -74,9 +74,47 @@ public class AzureOpenAIQueryGeneratorService : IQueryGeneratorService
                 var nullable = col.IsNullable ? " NULL" : " NOT NULL";
                 sb.AppendLine($"  - {col.Name} ({col.DataType}{nullable}{pk})");
             }
+            if (table.SampleRows.Count > 0)
+            {
+                sb.AppendLine("  Sample data:");
+                var header = string.Join(", ", table.Columns.Select(c => c.Name));
+                sb.AppendLine($"    [{header}]");
+                foreach (var row in table.SampleRows)
+                    sb.AppendLine($"    [{string.Join(", ", row)}]");
+            }
             sb.AppendLine();
         }
         return sb.ToString();
+    }
+
+    public async Task<string> GenerateInsightsAsync(
+        string naturalLanguageQuery,
+        List<string> columns,
+        List<List<object?>> rows)
+    {
+        const int MaxInsightRows = 50;
+        var sb = new System.Text.StringBuilder();
+        sb.AppendLine(string.Join("\t", columns));
+        foreach (var row in rows.Take(MaxInsightRows))
+            sb.AppendLine(string.Join("\t", row.Select(v => v?.ToString() ?? "NULL")));
+
+        var prompt = "You are a data analyst. Analyse the following query result and produce 3-5 concise, " +
+            "actionable bullet-point insights. Use plain English. Start each bullet with an emoji that reflects the insight type. " +
+            "Do NOT include any preamble or headers—return only the bullet points.\n\n" +
+            $"User question: {naturalLanguageQuery}\n\n" +
+            "Data (tab-separated, first row is header):\n" +
+            sb.ToString();
+
+        _logger.LogInformation("Generating AI insights for query: {Query}", naturalLanguageQuery);
+
+        var messages = new List<ChatMessage>
+        {
+            new SystemChatMessage("You are an expert data analyst who produces concise, insightful data summaries."),
+            new UserChatMessage(prompt)
+        };
+
+        var response = await _chatClient.CompleteChatAsync(messages);
+        return response.Value.Content[0].Text ?? string.Empty;
     }
 
     private static (string Sql, string Interpretation) ParseResponse(string content)

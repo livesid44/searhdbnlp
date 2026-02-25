@@ -13,6 +13,8 @@ public class TableInfo
     public string Schema { get; set; } = string.Empty;
     public string Name { get; set; } = string.Empty;
     public List<ColumnInfo> Columns { get; set; } = new();
+    /// <summary>Up to 5 sample rows from the table (column values as strings).</summary>
+    public List<string[]> SampleRows { get; set; } = new();
 
     public string FullName => $"[{Schema}].[{Name}]";
 }
