@@ -55,8 +55,8 @@ public class QueryController : Controller
                 return View("Result", emptyResult);
             }
 
-            var result = await _databaseService.ExecuteQueryAsync(sql, request.NaturalLanguageQuery);
-            result.Interpretation = interpretation;
+            var result = await ExecuteWithValidationAsync(
+                sql, request.NaturalLanguageQuery, interpretation);
 
             // Generate AI insights on the returned data
             if (result.HasData && !result.HasError)
@@ -84,5 +84,45 @@ public class QueryController : Controller
             };
             return View("Result", errorResult);
         }
+    }
+
+    /// <summary>
+    /// Validates the generated SQL before execution. If column/table names are wrong,
+    /// asks the AI to repair it using the real column names discovered via SELECT TOP 1 *.
+    /// </summary>
+    private async Task<QueryResult> ExecuteWithValidationAsync(
+        string sql, string naturalLanguageQuery, string interpretation)
+    {
+        var (isValid, sqlError, actualColumns) = await _databaseService.ValidateQueryAsync(sql);
+
+        string finalSql = sql;
+        string? originalSql = null;
+
+        if (!isValid && actualColumns.Count > 0)
+        {
+            _logger.LogInformation(
+                "SQL failed validation: {Error}. Attempting AI repair with actual columns.", sqlError);
+            try
+            {
+                var repairedSql = await _queryGenerator.RepairSqlAsync(sql, sqlError!, actualColumns);
+                if (!string.IsNullOrWhiteSpace(repairedSql)
+                    && (repairedSql.StartsWith("SELECT", StringComparison.OrdinalIgnoreCase)
+                        || repairedSql.StartsWith("WITH", StringComparison.OrdinalIgnoreCase)))
+                {
+                    originalSql = sql;
+                    finalSql = repairedSql;
+                    _logger.LogInformation("Using repaired SQL: {Sql}", finalSql);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "SQL repair failed; proceeding with original SQL.");
+            }
+        }
+
+        var result = await _databaseService.ExecuteQueryAsync(finalSql, naturalLanguageQuery);
+        result.Interpretation = interpretation;
+        result.OriginalSql = originalSql;
+        return result;
     }
 }

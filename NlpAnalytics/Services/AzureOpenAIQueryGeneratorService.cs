@@ -117,6 +117,49 @@ public class AzureOpenAIQueryGeneratorService : IQueryGeneratorService
         return response.Value.Content[0].Text ?? string.Empty;
     }
 
+    public async Task<string> RepairSqlAsync(
+        string brokenSql,
+        string sqlError,
+        Dictionary<string, List<string>> actualColumnsByTable)
+    {
+        var sb = new System.Text.StringBuilder();
+        sb.AppendLine("The following T-SQL query failed with a column or table name error.");
+        sb.AppendLine("Fix ONLY the invalid column/table names. Do not change any other part of the query logic.");
+        sb.AppendLine("Return ONLY the corrected T-SQL SELECT statement — no JSON, no markdown, no explanation.");
+        sb.AppendLine();
+        sb.AppendLine("Broken SQL:");
+        sb.AppendLine(brokenSql);
+        sb.AppendLine();
+        sb.AppendLine($"Error: {sqlError}");
+        sb.AppendLine();
+        sb.AppendLine("Actual columns available in each referenced table:");
+        foreach (var (table, cols) in actualColumnsByTable)
+            sb.AppendLine($"  {table}: {string.Join(", ", cols)}");
+
+        _logger.LogInformation("Requesting SQL repair for error: {Error}", sqlError);
+
+        var messages = new List<ChatMessage>
+        {
+            new SystemChatMessage("You are an expert T-SQL developer. Correct invalid column and table names in SQL queries."),
+            new UserChatMessage(sb.ToString())
+        };
+
+        var response = await _chatClient.CompleteChatAsync(messages);
+        var repaired = response.Value.Content[0].Text ?? string.Empty;
+
+        // Strip markdown fences if present
+        repaired = repaired.Trim();
+        if (repaired.StartsWith("```"))
+        {
+            var end = repaired.LastIndexOf("```");
+            var start = repaired.IndexOf('\n') + 1;
+            repaired = repaired[start..end].Trim();
+        }
+
+        _logger.LogInformation("Repaired SQL: {Sql}", repaired);
+        return repaired;
+    }
+
     private static (string Sql, string Interpretation) ParseResponse(string content)
     {
         try

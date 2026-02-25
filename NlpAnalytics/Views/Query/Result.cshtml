@@ -68,12 +68,29 @@
             {
                 <div class="card border-0 shadow-sm mb-4">
                     <div class="card-header bg-dark text-white d-flex justify-content-between align-items-center">
-                        <span>📝 Generated SQL</span>
+                        <span>
+                            📝 Generated SQL
+                            @if (Model.WasRepaired)
+                            {
+                                <span class="badge bg-warning text-dark ms-2" title="The original AI query contained invalid column names and was automatically corrected.">🔧 Auto-corrected</span>
+                            }
+                        </span>
                         <button class="btn btn-sm btn-outline-light" id="copySqlBtn" onclick="copyToClipboard()">Copy</button>
                     </div>
                     <div class="card-body p-0">
                         <pre id="sqlCode" class="m-0 p-3 bg-dark text-success" style="overflow-x:auto;"><code>@Model.GeneratedSql</code></pre>
                     </div>
+                    @if (Model.WasRepaired && !string.IsNullOrWhiteSpace(Model.OriginalSql))
+                    {
+                        <div class="card-footer border-top-0 bg-dark">
+                            <details>
+                                <summary class="text-warning small" style="cursor:pointer;">
+                                    ⚠️ Original (invalid) SQL — click to expand
+                                </summary>
+                                <pre class="mt-2 p-2 text-warning small mb-0" style="white-space:pre-wrap;">@Model.OriginalSql</pre>
+                            </details>
+                        </div>
+                    }
                 </div>
             }
 

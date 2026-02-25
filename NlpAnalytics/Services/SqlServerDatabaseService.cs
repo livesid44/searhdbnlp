@@ -94,6 +94,105 @@ public class SqlServerDatabaseService : IDatabaseService
         return result;
     }
 
+    public async Task<(bool IsValid, string? SqlError, Dictionary<string, List<string>> ActualColumnsByTable)>
+        ValidateQueryAsync(string sql)
+    {
+        var empty = new Dictionary<string, List<string>>();
+        try
+        {
+            await using var conn = new SqlConnection(_connectionString);
+            await conn.OpenAsync();
+
+            // Zero-row fetch — parses and validates all column/table names but returns no data
+            var checkSql = $"SELECT TOP 0 * FROM ({sql}) AS __chk__";
+            await using var cmd = new SqlCommand(checkSql, conn) { CommandTimeout = 15 };
+            await using var reader = await cmd.ExecuteReaderAsync();
+            // No rows read — we only need the schema validation
+            return (true, null, empty);
+        }
+        catch (SqlException ex) when (IsColumnOrTableError(ex))
+        {
+            _logger.LogWarning("SQL validation failed ({Number}): {Message}", ex.Number, ex.Message);
+
+            // Discover actual columns for tables mentioned in the query
+            var actualColumns = await FetchActualColumnsForTablesAsync(sql);
+            return (false, ex.Message, actualColumns);
+        }
+        catch (Exception ex)
+        {
+            // Other errors (syntax errors, etc.) — still report as invalid
+            _logger.LogWarning("SQL validation error: {Message}", ex.Message);
+            return (false, ex.Message, empty);
+        }
+    }
+
+    /// <summary>
+    /// SQL Server error numbers for invalid column / object names.
+    /// 207 = Invalid column name, 208 = Invalid object name, 4104 = multi-part identifier
+    /// </summary>
+    private static bool IsColumnOrTableError(SqlException ex)
+        => ex.Errors.Cast<SqlError>().Any(e => e.Number is 207 or 208 or 4104);
+
+    /// <summary>
+    /// Extracts fully-qualified table names from the SQL text using a simple
+    /// [schema].[table] / schema.table pattern, then runs SELECT TOP 1 * on each
+    /// to obtain the real column list.
+    /// </summary>
+    private async Task<Dictionary<string, List<string>>> FetchActualColumnsForTablesAsync(string sql)
+    {
+        var result = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
+
+        // Match [schema].[table] or schema.table patterns
+        var pattern = new System.Text.RegularExpressions.Regex(
+            @"\[?(\w+)\]?\.\[?(\w+)\]?",
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+
+        var matches = pattern.Matches(sql);
+        var tables = matches
+            .Cast<System.Text.RegularExpressions.Match>()
+            .Select(m => (schema: m.Groups[1].Value, name: m.Groups[2].Value,
+                          full: $"[{m.Groups[1].Value}].[{m.Groups[2].Value}]"))
+            .DistinctBy(t => t.full, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        if (tables.Count == 0)
+            return result;
+
+        try
+        {
+            await using var conn = new SqlConnection(_connectionString);
+            await conn.OpenAsync();
+
+            foreach (var tbl in tables)
+            {
+                try
+                {
+                    var sampleSql = $"SELECT TOP 1 * FROM {tbl.full}";
+                    await using var cmd = new SqlCommand(sampleSql, conn) { CommandTimeout = 10 };
+                    await using var reader = await cmd.ExecuteReaderAsync(
+                        System.Data.CommandBehavior.SchemaOnly);
+
+                    var cols = new List<string>();
+                    for (var i = 0; i < reader.FieldCount; i++)
+                        cols.Add(reader.GetName(i));
+
+                    result[tbl.full] = cols;
+                    _logger.LogInformation("Fetched {Count} columns for {Table}", cols.Count, tbl.full);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning("Could not fetch columns for {Table}: {Message}", tbl.full, ex.Message);
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning("Could not open connection for column discovery: {Message}", ex.Message);
+        }
+
+        return result;
+    }
+
     private static ChartData? BuildChartData(QueryResult result)
     {
         if (result.Columns.Count < 2 || result.Rows.Count == 0
