@@ -52,8 +52,13 @@ public class SqlServerDatabaseService : IDatabaseService
             await using var conn = new SqlConnection(_connectionString);
             await conn.OpenAsync();
 
+            // Strip any top-level ORDER BY before wrapping in the row-limit subquery.
+            // SQL Server error 1033: "ORDER BY invalid in derived tables without TOP/OFFSET".
+            // The ORDER BY has no effect anyway since TOP already controls the row set.
+            var sqlForExecution = RemoveTopLevelOrderBy(trimmed);
+
             // Wrap the query to limit rows
-            var limitedSql = $"SELECT TOP {MaxRows} * FROM ({sql}) AS __inner__";
+            var limitedSql = $"SELECT TOP {MaxRows} * FROM ({sqlForExecution}) AS __inner__";
 
             await using var cmd = new SqlCommand(limitedSql, conn)
             {
