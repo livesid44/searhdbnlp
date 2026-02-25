@@ -7,6 +7,9 @@ public class QueryResult
     /// <summary>Set when the first AI-generated SQL was invalid and was automatically repaired.</summary>
     public string? OriginalSql { get; set; }
     public bool WasRepaired => OriginalSql != null;
+    /// <summary>Set when SQL validation detected an invalid column/table name error,
+    /// whether or not the AI repair succeeded. Used to surface a warning in the UI.</summary>
+    public string? ValidationWarning { get; set; }
     public string Interpretation { get; set; } = string.Empty;
     public List<string> Columns { get; set; } = new();
     /// <summary>Runtime .NET types for each column, parallel to Columns.</summary>

@@ -103,8 +103,13 @@ public class SqlServerDatabaseService : IDatabaseService
             await using var conn = new SqlConnection(_connectionString);
             await conn.OpenAsync();
 
+            // Strip any top-level ORDER BY before wrapping — SQL Server raises error 1033
+            // ("ORDER BY is invalid in derived tables/subqueries without TOP/OFFSET") which
+            // would mask the real error 207/208 (invalid column/table name) we want to catch.
+            var sqlForValidation = RemoveTopLevelOrderBy(sql.Trim());
+
             // Zero-row fetch — parses and validates all column/table names but returns no data
-            var checkSql = $"SELECT TOP 0 * FROM ({sql}) AS __chk__";
+            var checkSql = $"SELECT TOP 0 * FROM ({sqlForValidation}) AS __chk__";
             await using var cmd = new SqlCommand(checkSql, conn) { CommandTimeout = 15 };
             await using var reader = await cmd.ExecuteReaderAsync();
             // No rows read — we only need the schema validation
@@ -132,6 +137,49 @@ public class SqlServerDatabaseService : IDatabaseService
     /// </summary>
     private static bool IsColumnOrTableError(SqlException ex)
         => ex.Errors.Cast<SqlError>().Any(e => e.Number is 207 or 208 or 4104);
+
+    /// <summary>
+    /// Removes any top-level ORDER BY clause (at parenthesis depth 0) from the SQL text.
+    /// SQL Server raises error 1033 when ORDER BY appears inside a bare subquery/derived
+    /// table without a TOP or OFFSET clause, which would prevent the SELECT TOP 0 validation
+    /// wrapper from reaching the real column-name error (207).
+    /// </summary>
+    private static string RemoveTopLevelOrderBy(string sql)
+    {
+        var lastOrderByAt = -1;
+        var depth = 0;
+
+        for (var i = 0; i < sql.Length; i++)
+        {
+            var c = sql[i];
+            if (c == '(') { depth++; continue; }
+            if (c == ')') { depth--; continue; }
+            if (depth != 0) continue;
+            if (i + 7 >= sql.Length) continue;
+
+            // Word boundary before 'O'
+            if (i > 0 && (char.IsLetterOrDigit(sql[i - 1]) || sql[i - 1] == '_')) continue;
+
+            if (!string.Equals(sql.Substring(i, 5), "ORDER", StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            // Skip whitespace between ORDER and BY
+            var j = i + 5;
+            while (j < sql.Length && char.IsWhiteSpace(sql[j])) j++;
+            if (j + 2 > sql.Length) continue;
+            if (!string.Equals(sql.Substring(j, 2), "BY", StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            // BY must be followed by a non-identifier character (or end of string)
+            var afterBy = j + 2;
+            if (afterBy < sql.Length && (char.IsLetterOrDigit(sql[afterBy]) || sql[afterBy] == '_'))
+                continue;
+
+            lastOrderByAt = i;
+        }
+
+        return lastOrderByAt >= 0 ? sql[..lastOrderByAt].TrimEnd() : sql;
+    }
 
     /// <summary>
     /// Extracts fully-qualified table names from the SQL text using a simple

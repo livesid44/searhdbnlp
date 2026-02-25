@@ -40,11 +40,15 @@ public class AzureOpenAIQueryGeneratorService : IQueryGeneratorService
             "- The \"sql\" value must be a valid T-SQL SELECT statement (no trailing semicolon).\n" +
             "- Do NOT include markdown code fences, comments, or any text outside the JSON.\n" +
             "- Only generate SELECT or WITH...SELECT statements; never INSERT, UPDATE, DELETE, DROP, or EXEC.\n" +
-            "- Use table and column names exactly as defined in the schema.\n" +
+            "- CRITICAL COLUMN RULE: Every column name you use in the SQL MUST appear VERBATIM in the " +
+            "schema listing above for that table. Do NOT invent column names, do NOT combine two separate " +
+            "columns into one name (e.g. if the schema has 'Month' and 'FY' as separate columns, you must " +
+            "NEVER write 'FY_Year' — they are two different columns). Check the exact column names in the " +
+            "schema before writing the query.\n" +
             "- If the question cannot be answered with the available schema, set \"sql\" to \"\" and explain in \"interpretation\".\n\n" +
             "Example response:\n" +
-            "{\"sql\": \"SELECT TOP 10 CustomerName, TotalOrders FROM Customers ORDER BY TotalOrders DESC\", " +
-            "\"interpretation\": \"These are the top 10 customers by number of orders.\"}";
+            "{\"sql\": \"SELECT TOP 10 AccountName, TotalOrders FROM Customers ORDER BY TotalOrders DESC\", " +
+            "\"interpretation\": \"These are the top 10 accounts by number of orders.\"}";
 
         var messages = new List<ChatMessage>
         {

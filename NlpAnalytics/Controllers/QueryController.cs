@@ -97,6 +97,13 @@ public class QueryController : Controller
 
         string finalSql = sql;
         string? originalSql = null;
+        string? validationWarning = null;
+
+        if (!isValid)
+        {
+            // Record the validation error so the UI can always surface it
+            validationWarning = sqlError;
+        }
 
         if (!isValid && actualColumns.Count > 0)
         {
@@ -123,6 +130,9 @@ public class QueryController : Controller
         var result = await _databaseService.ExecuteQueryAsync(finalSql, naturalLanguageQuery);
         result.Interpretation = interpretation;
         result.OriginalSql = originalSql;
+        // Only surface the warning when repair didn't fully fix the problem
+        // (if repair succeeded, the badge already communicates what happened)
+        result.ValidationWarning = originalSql == null ? validationWarning : null;
         return result;
     }
 }

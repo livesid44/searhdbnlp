@@ -64,6 +64,19 @@
                 </div>
             }
 
+            @if (!string.IsNullOrWhiteSpace(Model.ValidationWarning) && !Model.WasRepaired)
+            {
+                <div class="alert alert-warning d-flex align-items-start gap-2" role="alert">
+                    <span class="fs-5">🔧</span>
+                    <div>
+                        <strong>SQL column-name warning detected.</strong>
+                        The AI-generated query may reference column names that do not exist in the database.
+                        Please review the generated SQL and column names carefully.
+                        <small class="d-block text-muted mt-1">Detail: @Model.ValidationWarning</small>
+                    </div>
+                </div>
+            }
+
             @if (!string.IsNullOrWhiteSpace(Model.GeneratedSql))
             {
                 <div class="card border-0 shadow-sm mb-4">
