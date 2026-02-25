@@ -8,8 +8,16 @@ public class SqlServerDatabaseService : IDatabaseService
     private const int MaxRows = 1000;
     private static readonly string[] ChartColors =
     [
-        "#36A2EB", "#FF6384", "#FFCE56", "#4BC0C0", "#9966FF",
-        "#FF9F40", "#C9CBCF", "#E7E9ED", "#71B37C", "#EC932F"
+        "#E31837",  // Pulse360 brand red
+        "#4a453d",  // warm dark
+        "#0A0838",  // dark navy
+        "#f3901d",  // accent orange
+        "#5F0229",  // deep maroon
+        "#F8B4A3",  // light salmon
+        "#4D4D4F",  // medium grey
+        "#ffc06a",  // light gold
+        "#808080",  // grey
+        "#C9CBCF"   // light grey
     ];
 
     /// <summary>All .NET numeric types that SQL Server can return.</summary>
