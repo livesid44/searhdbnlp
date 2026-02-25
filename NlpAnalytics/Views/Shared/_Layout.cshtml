@@ -3,45 +3,66 @@
 <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>@ViewData["Title"] - NlpAnalytics</title>
+    <title>@ViewData["Title"] - Pulse360 Analytics</title>
     <script type="importmap"></script>
     <link rel="stylesheet" href="~/lib/bootstrap/dist/css/bootstrap.min.css" />
-    <link rel="stylesheet" href="~/css/site.css" asp-append-version="true" />
-    <link rel="stylesheet" href="~/NlpAnalytics.styles.css" asp-append-version="true" />
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" crossorigin="anonymous" />
+    <link rel="stylesheet" href="~/css/pulse360.css" asp-append-version="true" />
 </head>
 <body>
-    <header>
-        <nav class="navbar navbar-expand-sm navbar-toggleable-sm navbar-light bg-white border-bottom box-shadow mb-3">
-            <div class="container-fluid">
-                <a class="navbar-brand" asp-area="" asp-controller="Home" asp-action="Index">NlpAnalytics</a>
-                <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target=".navbar-collapse" aria-controls="navbarSupportedContent"
-                        aria-expanded="false" aria-label="Toggle navigation">
-                    <span class="navbar-toggler-icon"></span>
-                </button>
-                <div class="navbar-collapse collapse d-sm-inline-flex justify-content-between">
-                    <ul class="navbar-nav flex-grow-1">
-                        <li class="nav-item">
-                            <a class="nav-link text-dark" asp-area="" asp-controller="Query" asp-action="Index">🔍 Analytics</a>
-                        </li>
-                        <li class="nav-item">
-                            <a class="nav-link text-dark" asp-area="" asp-controller="Home" asp-action="Privacy">Privacy</a>
-                        </li>
-                    </ul>
-                </div>
+
+    <!-- ── Pulse360 fixed header ──────────────────────────────────────────── -->
+    <header class="p360-header">
+        <div class="p360-header-inner" style="display:flex;align-items:center;justify-content:space-between;padding:10px 24px;gap:16px;background:#fff;">
+
+            <!-- Logo (left) -->
+            <div class="p360-logo" style="flex:0 0 auto;">
+                <a asp-controller="Home" asp-action="Index">
+                    <img src="~/img/logo.png" alt="Pulse360" style="max-width:160px;height:auto;display:block;" />
+                </a>
             </div>
-        </nav>
+
+            <!-- Main nav (centre) -->
+            <nav class="p360-mainnav" style="flex:1 1 auto;display:flex;justify-content:center;">
+                <ul class="nav" style="flex-wrap:nowrap;">
+                    <li class="nav-item">
+                        <a class="nav-link @(ViewContext.RouteData.Values["controller"]?.ToString() == "Query" ? "active" : "")"
+                           asp-controller="Query" asp-action="Index">🔍 Analytics</a>
+                    </li>
+                </ul>
+            </nav>
+
+            <!-- TechM logo (right) -->
+            <div class="p360-techmlogo" style="flex:0 0 auto;">
+                <img src="~/img/techMLogo.png" alt="TechM" style="max-width:110px;height:auto;display:block;" />
+            </div>
+
+        </div>
     </header>
-    <div class="container">
-        <main role="main" class="pb-3">
-            @RenderBody()
-        </main>
+
+    <!-- ── Main content ───────────────────────────────────────────────────── -->
+    <div class="p360-body-wrap">
+        <div class="container-fluid px-4">
+            <main role="main" class="pb-4">
+                @RenderBody()
+            </main>
+        </div>
     </div>
 
-    <footer class="border-top footer text-muted">
-        <div class="container">
-            &copy; 2026 - NlpAnalytics - <a asp-area="" asp-controller="Home" asp-action="Privacy">Privacy</a>
+    <!-- ── Footer ─────────────────────────────────────────────────────────── -->
+    <footer class="p360-footer">
+        <div class="container-fluid px-4">
+            <div class="row align-items-center">
+                <div class="col">
+                    <span class="text-muted">&copy; @DateTime.Now.Year Pulse360 Analytics · Powered by TechM</span>
+                </div>
+                <div class="col-auto p360-footer-logo">
+                    <img src="~/img/footer.png" alt="footer" />
+                </div>
+            </div>
         </div>
     </footer>
+
     <script src="~/lib/jquery/dist/jquery.min.js"></script>
     <script src="~/lib/bootstrap/dist/js/bootstrap.bundle.min.js"></script>
     <script src="~/js/site.js" asp-append-version="true"></script>

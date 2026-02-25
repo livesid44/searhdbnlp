@@ -1,0 +1,117 @@
+/* ── Pulse360 brand fonts ─────────────────────────────────────────────── */
+@font-face {
+  font-family: "Poppins-Regular";
+  src: url("../fonts/Poppins-Regular.ttf") format("truetype");
+}
+@font-face {
+  font-family: "Poppins-Bold";
+  src: url("../fonts/Poppins-Bold.ttf") format("truetype");
+}
+
+/* ── Base ────────────────────────────────────────────────────────────── */
+body {
+  font-family: "Poppins-Regular", sans-serif;
+  background-color: #f6f2ea;
+  letter-spacing: 0.3px;
+  font-size: 14px;
+  line-height: 1.4;
+}
+
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { box-shadow: inset 0 0 6px rgba(0,0,0,.3); }
+::-webkit-scrollbar-thumb { background-color: #666; outline: 1px solid #777; }
+::-webkit-scrollbar-thumb:hover { background-color: #444; }
+
+/* ── Top header ──────────────────────────────────────────────────────── */
+.p360-header {
+  background-color: #fff;
+  border-bottom: 1px solid #e0dbd0;
+  box-shadow: 0 2px 4px rgba(0,0,0,.06);
+  position: fixed;
+  top: 0; left: 0; right: 0;
+  z-index: 9999;
+}
+/* Horizontal three-column bar: logo | nav | techm-logo */
+.p360-header-inner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 24px;
+  gap: 16px;
+}
+.p360-logo            { flex: 0 0 auto; }
+.p360-logo img        { max-width: 160px; height: auto; display: block; }
+.p360-techmlogo       { flex: 0 0 auto; }
+.p360-techmlogo img   { max-width: 110px; height: auto; display: block; }
+/* Nav sits in the remaining space, centred */
+.p360-mainnav         { flex: 1 1 auto; display: flex; justify-content: center; }
+.p360-mainnav .nav    { flex-wrap: nowrap; }
+
+/* ── Main nav (centred) ──────────────────────────────────────────────── */
+.p360-mainnav .nav-link {
+  color: #808080;
+  font-weight: 600;
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  padding: 6px 18px;
+}
+.p360-mainnav .nav-link:hover,
+.p360-mainnav .nav-link.active {
+  color: #000;
+  border-bottom: 2px solid #e31837;
+}
+
+/* ── Body offset for fixed header ────────────────────────────────────── */
+.p360-body-wrap {
+  padding-top: 80px;
+  min-height: calc(100vh - 80px);
+}
+
+/* ── Footer ──────────────────────────────────────────────────────────── */
+.p360-footer {
+  background-color: #fff;
+  border-top: 1px solid #e0dbd0;
+  padding: 14px 0;
+  font-size: 12px;
+  color: #999;
+}
+.p360-footer-logo img {
+  max-width: 200px;
+  height: auto;
+}
+
+/* ── Card overrides ─────────────────────────────────────────────────── */
+.card { border-radius: 6px !important; }
+.card-header { font-size: 14px; }
+
+/* ── Table ──────────────────────────────────────────────────────────── */
+.table { font-size: 13px; }
+.table thead th { background-color: #4a453d; color: #fff; font-weight: 600; }
+
+/* ── Buttons ─────────────────────────────────────────────────────────── */
+.btn-primary { background-color: #e31837 !important; border-color: #e31837 !important; }
+.btn-primary:hover { background-color: #b81229 !important; border-color: #b81229 !important; }
+.btn-outline-primary { color: #e31837 !important; border-color: #e31837 !important; }
+.btn-outline-primary:hover { background-color: #e31837 !important; color: #fff !important; }
+.btn-outline-primary.active { background-color: #e31837 !important; color: #fff !important; border-color: #e31837 !important; }
+.btn-primary.active { background-color: #b81229 !important; }
+
+/* ── Alert / badge tweaks ────────────────────────────────────────────── */
+.alert-info { background-color: #e8f4fd; border-color: #b8daff; color: #0c5460; }
+.badge.bg-secondary { background-color: #4a453d !important; }
+
+/* ── Revenue badge ───────────────────────────────────────────────────── */
+.rev-m { font-variant-numeric: tabular-nums; }
+
+/* ── AI Insights card header ─────────────────────────────────────────── */
+.card-header.bg-primary { background-color: #e31837 !important; }
+
+/* ── Page title ──────────────────────────────────────────────────────── */
+.pg-title {
+  color: #000;
+  font-size: 18px;
+  font-weight: bold;
+  font-family: "Poppins-Bold", sans-serif;
+  margin-bottom: 20px;
+}

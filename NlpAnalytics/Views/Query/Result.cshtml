@@ -5,6 +5,7 @@
     ViewData["Title"] = "Query Results";
     var camelCase = new JsonSerializerSettings { ContractResolver = new CamelCasePropertyNamesContractResolver() };
     var chartJson = Model.ChartData != null ? JsonConvert.SerializeObject(Model.ChartData, camelCase) : "null";
+
     // Identify pivot dimensions for the JS pivot engine
     var pivotRowColIdx = 0;
     var pivotColColIdx = 1;
@@ -17,6 +18,25 @@
                 typeof(float), typeof(double), typeof(decimal) }.Contains(x.t)).i;
         if (stringIdxs.Count >= 2) { pivotRowColIdx = stringIdxs[0]; pivotColColIdx = stringIdxs[1]; }
         pivotValColIdx = numIdx;
+    }
+
+    // Revenue columns: numeric columns whose name contains revenue/amount/sales/value/cost/price/budget/spend
+    static bool IsRevenueColumn(string name) =>
+        System.Text.RegularExpressions.Regex.IsMatch(name,
+            @"\b(revenue|amount|sales|value|cost|price|budget|spend|earning|profit|loss|billing)\b",
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+
+    var revenueColIndices = new HashSet<int>(
+        Model.Columns.Select((name, i) => (name, i))
+            .Where(x => IsRevenueColumn(x.name))
+            .Select(x => x.i));
+
+    string FormatCell(int colIdx, object? cell)
+    {
+        if (cell == null) return "<null>";
+        if (revenueColIndices.Contains(colIdx) && decimal.TryParse(cell.ToString(), out var d))
+            return "$" + (d / 1_000_000m).ToString("0.##") + "M";
+        return cell.ToString() ?? "<null>";
     }
 }
 
@@ -141,9 +161,9 @@
                                     @foreach (var row in Model.Rows)
                                     {
                                         <tr>
-                                            @foreach (var cell in row)
+                                            @for (var ci = 0; ci < row.Count; ci++)
                                             {
-                                                <td>@(cell?.ToString() ?? "<null>")</td>
+                                                <td class="@(revenueColIndices.Contains(ci) ? "rev-m" : "")">@FormatCell(ci, row[ci])</td>
                                             }
                                         </tr>
                                     }
@@ -222,9 +242,7 @@
 </div>
 
 @section Scripts {
-    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"
-            integrity="sha256-oVuCFnNfBb5ZqSt6V7O7xBP9bgHFABSvDOzO0QZCZJo="
-            crossorigin="anonymous"></script>
+    <script src="~/js/chart.js"></script>
     <script>
         // ── Chart setup ──────────────────────────────────────────────────────────
         var chartData = @Html.Raw(chartJson);

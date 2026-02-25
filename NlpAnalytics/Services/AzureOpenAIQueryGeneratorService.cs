@@ -104,7 +104,9 @@ public class AzureOpenAIQueryGeneratorService : IQueryGeneratorService
 
         var prompt = "You are a data analyst. Analyse the following query result and produce 3-5 concise, " +
             "actionable bullet-point insights. Use plain English. Start each bullet with an emoji that reflects the insight type. " +
-            "Do NOT include any preamble or headers—return only the bullet points.\n\n" +
+            "Do NOT include any preamble or headers—return only the bullet points.\n" +
+            "IMPORTANT: All revenue, amount, sales, cost, and financial values in the data are in US Dollars expressed in millions (M). " +
+            "Always state monetary figures as '$X.XXM' in your insights.\n\n" +
             $"User question: {naturalLanguageQuery}\n\n" +
             "Data (tab-separated, first row is header):\n" +
             sb.ToString();
