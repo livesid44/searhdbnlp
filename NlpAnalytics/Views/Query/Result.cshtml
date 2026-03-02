@@ -6,18 +6,20 @@
     var camelCase = new JsonSerializerSettings { ContractResolver = new CamelCasePropertyNamesContractResolver() };
     var chartJson = Model.ChartData != null ? JsonConvert.SerializeObject(Model.ChartData, camelCase) : "null";
 
-    // Identify pivot dimensions for the JS pivot engine
+    // Smart defaults for the pivot dropdowns (first string col → Row, second → Column, first numeric → Value)
     var pivotRowColIdx = 0;
-    var pivotColColIdx = 1;
-    var pivotValColIdx = 2;
-    if (Model.IsPivotable && Model.ColumnTypes.Count >= 3)
+    var pivotColColIdx = Math.Min(1, Math.Max(0, Model.Columns.Count - 1));
+    var pivotValColIdx = Math.Min(2, Math.Max(0, Model.Columns.Count - 1));
+    if (Model.ColumnTypes.Count >= 2)
     {
         var stringIdxs = Model.ColumnTypes.Select((t, i) => (t, i)).Where(x => x.t == typeof(string)).Select(x => x.i).ToList();
-        var numIdx = Model.ColumnTypes.Select((t, i) => (t, i))
-            .FirstOrDefault(x => new HashSet<Type> { typeof(int), typeof(long), typeof(short), typeof(byte),
-                typeof(float), typeof(double), typeof(decimal) }.Contains(x.t)).i;
-        if (stringIdxs.Count >= 2) { pivotRowColIdx = stringIdxs[0]; pivotColColIdx = stringIdxs[1]; }
-        pivotValColIdx = numIdx;
+        var numericTypes = new HashSet<Type> { typeof(int), typeof(long), typeof(short), typeof(byte),
+                typeof(float), typeof(double), typeof(decimal) };
+        var numPair = Model.ColumnTypes.Select((t, i) => (t, i)).FirstOrDefault(x => numericTypes.Contains(x.t));
+        if (stringIdxs.Count >= 1) pivotRowColIdx = stringIdxs[0];
+        if (stringIdxs.Count >= 2) pivotColColIdx = stringIdxs[1];
+        else pivotColColIdx = (pivotRowColIdx + 1) % Math.Max(1, Model.Columns.Count);
+        if (numPair.t != null) pivotValColIdx = numPair.i;
     }
 
     // Revenue columns: numeric columns whose name contains revenue/amount/sales/value/cost/price/budget/spend
@@ -136,15 +138,12 @@
                 <div class="d-flex justify-content-between align-items-center mb-2">
                     <h6 class="mb-0"><i class="bi bi-table me-1"></i> Results — <span class="badge bg-secondary">@Model.RowCount row@(Model.RowCount == 1 ? "" : "s")</span></h6>
                     <div class="btn-group btn-group-sm" role="group">
-                        <button class="btn btn-primary active" id="btnTable" onclick="showView('table')">Table</button>
+                        <button class="btn btn-primary active" id="btnTable" onclick="showView('table')"><i class="bi bi-table me-1"></i>Table</button>
                         @if (Model.ChartData != null)
                         {
-                            <button class="btn btn-outline-primary" id="btnChart" onclick="showView('chart')">Chart</button>
+                            <button class="btn btn-outline-primary" id="btnChart" onclick="showView('chart')"><i class="bi bi-bar-chart-fill me-1"></i>Chart</button>
                         }
-                        @if (Model.IsPivotable)
-                        {
-                            <button class="btn btn-outline-primary" id="btnPivot" onclick="showView('pivot')">Pivot</button>
-                        }
+                        <button class="btn btn-outline-primary" id="btnPivot" onclick="showView('pivot')"><i class="bi bi-grid-3x3-gap-fill me-1"></i>Pivot</button>
                     </div>
                 </div>
 
@@ -198,13 +197,12 @@
                     </div>
                 }
 
-                @if (Model.IsPivotable)
-                {
-                    @* Pivot Table View *@
-                    <div id="pivotView" class="card border-0 shadow-sm mb-4 d-none">
-                        <div class="card-header d-flex align-items-center gap-3">
-                            <span class="fw-semibold">🔄 Pivot Table</span>
-                            <div class="ms-auto d-flex gap-2 align-items-center small">
+                @* Pivot Table View — always available, user-configurable *@
+                <div id="pivotView" class="card border-0 shadow-sm mb-4 d-none">
+                    <div class="card-header">
+                        <div class="d-flex flex-wrap align-items-center gap-2">
+                            <span class="fw-semibold me-2"><i class="bi bi-grid-3x3-gap-fill me-1 text-danger"></i>Pivot Table</span>
+                            <div class="d-flex gap-2 align-items-center small flex-wrap">
                                 <label class="mb-0 text-muted">Row:</label>
                                 <select id="pivotRowSel" class="form-select form-select-sm w-auto" onchange="renderPivot()">
                                     @for (var i = 0; i < Model.Columns.Count; i++)
@@ -226,13 +224,24 @@
                                         <option value="@i" selected="@(i == pivotValColIdx ? "selected" : null)">@Model.Columns[i]</option>
                                     }
                                 </select>
+                                <label class="mb-0 text-muted">Aggregate:</label>
+                                <select id="pivotAggSel" class="form-select form-select-sm w-auto" onchange="renderPivot()">
+                                    <option value="sum">Sum</option>
+                                    <option value="count">Count</option>
+                                    <option value="avg">Avg</option>
+                                    <option value="min">Min</option>
+                                    <option value="max">Max</option>
+                                </select>
                             </div>
-                        </div>
-                        <div class="card-body p-0">
-                            <div class="table-responsive" id="pivotContainer"></div>
+                            <button class="btn btn-sm btn-outline-secondary ms-auto" onclick="exportPivotCsv()">
+                                <i class="bi bi-download me-1"></i>Export CSV
+                            </button>
                         </div>
                     </div>
-                }
+                    <div class="card-body p-0">
+                        <div class="table-responsive" id="pivotContainer"></div>
+                    </div>
+                </div>
             }
             else if (!Model.HasError)
             {
@@ -321,50 +330,136 @@
         }
 
         // ── Pivot table renderer ─────────────────────────────────────────────────
+        // Stores last rendered pivot matrix for CSV export
+        var _pivotLastState = null;
+
         function renderPivot() {
             var rowColIdx = parseInt(document.getElementById('pivotRowSel').value);
             var colColIdx = parseInt(document.getElementById('pivotColSel').value);
             var valColIdx = parseInt(document.getElementById('pivotValSel').value);
+            var agg       = document.getElementById('pivotAggSel').value; // sum|count|avg|min|max
 
-            // Collect unique row/col keys
-            var rowKeys = [], colKeys = [], seen = {r: {}, c: {}};
+            // Collect unique row/col keys (preserve insertion order)
+            var rowKeys = [], colKeys = [], seenR = {}, seenC = {};
             rawRows.forEach(function(row) {
-                var rk = row[rowColIdx] || '(null)', ck = row[colColIdx] || '(null)';
-                if (!seen.r[rk]) { seen.r[rk] = true; rowKeys.push(rk); }
-                if (!seen.c[ck]) { seen.c[ck] = true; colKeys.push(ck); }
+                var rk = row[rowColIdx] != null ? String(row[rowColIdx]) : '(null)';
+                var ck = row[colColIdx] != null ? String(row[colColIdx]) : '(null)';
+                if (!seenR[rk]) { seenR[rk] = true; rowKeys.push(rk); }
+                if (!seenC[ck]) { seenC[ck] = true; colKeys.push(ck); }
             });
 
-            // Build lookup: rowKey → colKey → value (last wins / sum if numeric)
-            var matrix = {};
+            // Build accumulator: rowKey → colKey → array of numeric values
+            var accum = {};
+            rowKeys.forEach(function(rk) { accum[rk] = {}; colKeys.forEach(function(ck) { accum[rk][ck] = []; }); });
+
             rawRows.forEach(function(row) {
-                var rk = row[rowColIdx] || '(null)';
-                var ck = row[colColIdx] || '(null)';
-                var v = row[valColIdx];
-                if (!matrix[rk]) matrix[rk] = {};
-                var existing = matrix[rk][ck];
+                var rk = row[rowColIdx] != null ? String(row[rowColIdx]) : '(null)';
+                var ck = row[colColIdx] != null ? String(row[colColIdx]) : '(null)';
+                var v  = row[valColIdx];
                 var num = parseFloat(v);
-                if (!isNaN(num) && existing !== undefined) {
-                    matrix[rk][ck] = (parseFloat(existing) || 0) + num;
-                } else {
-                    matrix[rk][ck] = v !== null ? v : '';
-                }
+                accum[rk][ck].push(isNaN(num) ? v : num);
             });
 
-            // Render HTML table
-            var html = '<table class="table table-bordered table-sm table-hover mb-0"><thead class="table-dark"><tr><th></th>';
-            colKeys.forEach(function(ck) { html += '<th>' + esc(ck) + '</th>'; });
+            // Apply aggregation function
+            function aggregate(vals) {
+                if (vals.length === 0) return '—';
+                var nums = vals.filter(function(v) { return typeof v === 'number'; });
+                if (agg === 'count') return vals.length;
+                if (nums.length === 0) return vals[vals.length - 1]; // non-numeric: last value
+                if (agg === 'sum') return nums.reduce(function(a,b){return a+b;},0);
+                if (agg === 'avg') { var s=nums.reduce(function(a,b){return a+b;},0); return Math.round(s/nums.length*100)/100; }
+                if (agg === 'min') return Math.min.apply(null,nums);
+                if (agg === 'max') return Math.max.apply(null,nums);
+                return nums[nums.length-1];
+            }
+
+            // Build final matrix
+            var matrix = {};
+            rowKeys.forEach(function(rk) {
+                matrix[rk] = {};
+                colKeys.forEach(function(ck) { matrix[rk][ck] = aggregate(accum[rk][ck]); });
+            });
+
+            // Save for CSV export
+            _pivotLastState = { rowKeys: rowKeys, colKeys: colKeys, matrix: matrix };
+
+            // Row totals (only meaningful for numeric agg)
+            var showTotals = (agg !== 'count' || true); // always show count totals
+
+            // ── Render HTML ──────────────────────────────────────────────────────
+            var html = '<table class="table table-bordered table-sm table-hover mb-0 pivot-tbl">';
+            html += '<thead class="table-dark"><tr>';
+            html += '<th class="pivot-dim-label">' + esc(document.getElementById('pivotRowSel').options[rowColIdx] ? document.getElementById('pivotRowSel').options[rowColIdx].text : '') + ' \\ ' + esc(document.getElementById('pivotColSel').options[colColIdx] ? document.getElementById('pivotColSel').options[colColIdx].text : '') + '</th>';
+            colKeys.forEach(function(ck) { html += '<th class="text-center">' + esc(ck) + '</th>'; });
+            html += '<th class="text-center table-warning pivot-total-hdr">Total</th>';
             html += '</tr></thead><tbody>';
+
+            var colTotals = {};
+            colKeys.forEach(function(ck) { colTotals[ck] = []; });
+            var grandVals = [];
+
             rowKeys.forEach(function(rk) {
                 html += '<tr><th class="table-secondary">' + esc(rk) + '</th>';
+                var rowVals = [];
                 colKeys.forEach(function(ck) {
-                    var val = (matrix[rk] && matrix[rk][ck] !== undefined) ? matrix[rk][ck] : '—';
-                    html += '<td>' + esc(String(val)) + '</td>';
+                    var val = matrix[rk][ck];
+                    var disp = (val === '—' || val === undefined) ? '—' : val;
+                    html += '<td class="text-end">' + esc(String(disp)) + '</td>';
+                    if (typeof val === 'number') { rowVals.push(val); colTotals[ck].push(val); grandVals.push(val); }
+                    else if (val !== '—' && val !== undefined) { colTotals[ck].push(val); }
                 });
+                var rowTotal = rowVals.length ? aggregate(rowVals) : '—';
+                html += '<td class="text-end fw-bold table-warning">' + esc(String(rowTotal)) + '</td>';
                 html += '</tr>';
             });
+
+            // Grand total row
+            html += '<tr class="table-warning fw-bold"><th>Grand Total</th>';
+            var grandRowVals = [];
+            colKeys.forEach(function(ck) {
+                var ct = aggregate(colTotals[ck]);
+                if (typeof ct === 'number') grandRowVals.push(ct);
+                html += '<td class="text-end">' + esc(String(ct)) + '</td>';
+            });
+            var grandTotal = grandRowVals.length ? aggregate(grandRowVals) : '—';
+            html += '<td class="text-end">' + esc(String(grandTotal)) + '</td>';
+            html += '</tr>';
+
             html += '</tbody></table>';
             document.getElementById('pivotContainer').innerHTML = html;
         }
+
+        // ── Pivot CSV export ─────────────────────────────────────────────────────
+        function exportPivotCsv() {
+            if (!_pivotLastState) return;
+            var s = _pivotLastState;
+            var lines = [];
+            // Header
+            lines.push([''].concat(s.colKeys).concat(['Total']).map(csvQ).join(','));
+            // Rows
+            s.rowKeys.forEach(function(rk) {
+                var nums = [];
+                var cells = s.colKeys.map(function(ck) {
+                    var v = s.matrix[rk][ck];
+                    if (typeof v === 'number') nums.push(v);
+                    return csvQ(v === '—' || v == null ? '' : String(v));
+                });
+                var rowTotal = nums.length ? nums.reduce(function(a,b){return a+b;},0) : '';
+                lines.push([csvQ(rk)].concat(cells).concat([csvQ(String(rowTotal))]).join(','));
+            });
+            // Grand total
+            var colTotStr = s.colKeys.map(function(ck) {
+                var vals = s.rowKeys.map(function(rk){ return s.matrix[rk][ck]; }).filter(function(v){return typeof v==='number';});
+                return csvQ(vals.length ? String(vals.reduce(function(a,b){return a+b;},0)) : '');
+            });
+            lines.push([csvQ('Grand Total')].concat(colTotStr).concat(['']).join(','));
+
+            var blob = new Blob([lines.join('\r\n')], {type:'text/csv'});
+            var a = document.createElement('a'); a.href = URL.createObjectURL(blob);
+            a.download = 'pivot.csv'; a.click();
+        }
+
+        function csvQ(v) { return '"' + String(v).replace(/"/g,'""') + '"'; }
 
         function esc(s) {
             return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');

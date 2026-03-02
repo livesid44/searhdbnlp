@@ -115,3 +115,10 @@ body {
   font-family: "Poppins-Bold", sans-serif;
   margin-bottom: 20px;
 }
+
+/* ── Pivot table ─────────────────────────────────────────────────────── */
+.pivot-tbl th.pivot-dim-label { min-width: 140px; white-space: nowrap; }
+.pivot-tbl thead th            { white-space: nowrap; font-size: 12px; }
+.pivot-tbl tbody th.table-secondary { font-weight: 600; font-size: 12px; }
+.pivot-tbl td, .pivot-tbl tbody th  { font-size: 12px; }
+.pivot-total-hdr { background-color: #ffc107 !important; color: #000 !important; }
