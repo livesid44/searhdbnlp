@@ -1,0 +1,572 @@
+@model NlpAnalytics.Models.QueryResult
+@using Newtonsoft.Json
+@using Newtonsoft.Json.Serialization
+@{
+    ViewData["Title"] = "Query Results";
+    var camelCase = new JsonSerializerSettings { ContractResolver = new CamelCasePropertyNamesContractResolver() };
+    var chartJson = Model.ChartData != null ? JsonConvert.SerializeObject(Model.ChartData, camelCase) : "null";
+
+    // Smart defaults for the pivot dropdowns (first string col → Row, second → Column, first numeric → Value)
+    var pivotRowColIdx = 0;
+    var pivotColColIdx = Math.Min(1, Math.Max(0, Model.Columns.Count - 1));
+    var pivotValColIdx = Math.Min(2, Math.Max(0, Model.Columns.Count - 1));
+    if (Model.ColumnTypes.Count >= 2)
+    {
+        var stringIdxs = Model.ColumnTypes.Select((t, i) => (t, i)).Where(x => x.t == typeof(string)).Select(x => x.i).ToList();
+        var numericTypes = new HashSet<Type> { typeof(int), typeof(long), typeof(short), typeof(byte),
+                typeof(float), typeof(double), typeof(decimal) };
+        var numPair = Model.ColumnTypes.Select((t, i) => (t, i)).FirstOrDefault(x => numericTypes.Contains(x.t));
+        if (stringIdxs.Count >= 1) pivotRowColIdx = stringIdxs[0];
+        if (stringIdxs.Count >= 2) pivotColColIdx = stringIdxs[1];
+        else pivotColColIdx = (pivotRowColIdx + 1) % Math.Max(1, Model.Columns.Count);
+        if (numPair.t != null) pivotValColIdx = numPair.i;
+    }
+
+    // Revenue columns: numeric columns whose name contains revenue/amount/sales/value/cost/price/budget/spend
+    static bool IsRevenueColumn(string name) =>
+        System.Text.RegularExpressions.Regex.IsMatch(name,
+            @"(revenue|amount|sales|value|cost|price|budget|spend|earning|profit|loss|billing)",
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+
+    var revenueColIndices = new HashSet<int>(
+        Model.Columns.Select((name, i) => (name, i))
+            .Where(x => IsRevenueColumn(x.name))
+            .Select(x => x.i));
+
+    string FormatCell(int colIdx, object? cell)
+    {
+        if (cell == null) return "<null>";
+        if (revenueColIndices.Contains(colIdx) && decimal.TryParse(
+                cell.ToString(),
+                System.Globalization.NumberStyles.Any,
+                System.Globalization.CultureInfo.InvariantCulture,
+                out var d))
+            return "$" + d.ToString("N2") + "M";
+        return cell.ToString() ?? "<null>";
+    }
+}
+
+<div class="container mt-4">
+    <div class="row justify-content-center">
+        <div class="col-lg-11">
+
+            @* Back / question header *@
+            <div class="d-flex align-items-center gap-2 mb-3">
+                <a asp-controller="Query" asp-action="Index" class="btn btn-outline-secondary btn-sm">
+                    ← New Query
+                </a>
+                <h5 class="mb-0 text-muted fst-italic">"@Model.NaturalLanguageQuery"</h5>
+            </div>
+
+            @if (Model.HasError)
+            {
+                <div class="alert alert-danger d-flex align-items-start gap-2" role="alert">
+                    <span class="fs-5"><i class="bi bi-exclamation-triangle-fill"></i></span>
+                    <div>
+                        <strong>Error</strong><br />@Model.ErrorMessage
+                    </div>
+                </div>
+            }
+
+            @if (!string.IsNullOrWhiteSpace(Model.Interpretation))
+            {
+                <div class="alert alert-info d-flex align-items-start gap-2" role="alert">
+                    <span class="fs-5"><i class="bi bi-lightbulb-fill"></i></span>
+                    <div>
+                        <strong>Interpretation:</strong> @Model.Interpretation
+                    </div>
+                </div>
+            }
+
+            @if (!string.IsNullOrWhiteSpace(Model.AiInsights))
+            {
+                <div class="card border-0 shadow-sm mb-4">
+                    <div class="card-header fw-semibold bg-primary text-white">
+                        <i class="bi bi-robot me-1"></i> AI Insights
+                    </div>
+                    <div class="card-body">
+                        <div id="insightsContent" style="white-space:pre-line;">@Model.AiInsights</div>
+                    </div>
+                </div>
+            }
+
+            @if (!string.IsNullOrWhiteSpace(Model.ValidationWarning) && !Model.WasRepaired)
+            {
+                <div class="alert alert-warning d-flex align-items-start gap-2" role="alert">
+                    <span class="fs-5"><i class="bi bi-tools"></i></span>
+                    <div>
+                        <strong>SQL column-name warning detected.</strong>
+                        The AI-generated query may reference column names that do not exist in the database.
+                        Please review the generated SQL and column names carefully.
+                        <small class="d-block text-muted mt-1">Detail: @Model.ValidationWarning</small>
+                    </div>
+                </div>
+            }
+
+            @if (!string.IsNullOrWhiteSpace(Model.GeneratedSql))
+            {
+                <div class="card border-0 shadow-sm mb-4">
+                    <div class="card-header bg-dark text-white d-flex justify-content-between align-items-center">
+                        <span>
+                            <i class="bi bi-code-slash me-1"></i> Generated SQL
+                            @if (Model.WasRepaired)
+                            {
+                                <span class="badge bg-warning text-dark ms-2" title="The original AI query contained invalid column names and was automatically corrected."><i class="bi bi-tools me-1"></i>Auto-corrected</span>
+                            }
+                        </span>
+                        <button class="btn btn-sm btn-outline-light" id="copySqlBtn" onclick="copyToClipboard()"><i class="bi bi-clipboard me-1"></i>Copy</button>
+                    </div>
+                    <div class="card-body p-0">
+                        <pre id="sqlCode" class="m-0 p-3 bg-dark text-success" style="overflow-x:auto;"><code>@Model.GeneratedSql</code></pre>
+                    </div>
+                    @if (Model.WasRepaired && !string.IsNullOrWhiteSpace(Model.OriginalSql))
+                    {
+                        <div class="card-footer border-top-0 bg-dark">
+                            <details>
+                                <summary class="text-warning small" style="cursor:pointer;">
+                                    <i class="bi bi-exclamation-triangle me-1"></i> Original (invalid) SQL — click to expand
+                                </summary>
+                                <pre class="mt-2 p-2 text-warning small mb-0" style="white-space:pre-wrap;">@Model.OriginalSql</pre>
+                            </details>
+                        </div>
+                    }
+                </div>
+            }
+
+            @if (Model.HasData)
+            {
+                <div class="d-flex justify-content-between align-items-center mb-2">
+                    <h6 class="mb-0"><i class="bi bi-table me-1"></i> Results — <span class="badge bg-secondary">@Model.RowCount row@(Model.RowCount == 1 ? "" : "s")</span></h6>
+                    <div class="btn-group btn-group-sm" role="group">
+                        <button class="btn btn-primary active" id="btnTable" onclick="showView('table')"><i class="bi bi-table me-1"></i>Table</button>
+                        @if (Model.ChartData != null)
+                        {
+                            <button class="btn btn-outline-primary" id="btnChart" onclick="showView('chart')"><i class="bi bi-bar-chart-fill me-1"></i>Chart</button>
+                        }
+                        <button class="btn btn-outline-primary" id="btnPivot" onclick="showView('pivot')"><i class="bi bi-grid-3x3-gap-fill me-1"></i>Pivot</button>
+                    </div>
+                </div>
+
+                @* Table View *@
+                <div id="tableView" class="card border-0 shadow-sm mb-4">
+                    <div class="card-body p-0">
+                        <div class="table-responsive">
+                            <table class="table table-hover table-bordered table-sm mb-0" id="resultsTable">
+                                <thead class="table-dark">
+                                    <tr>
+                                        @foreach (var col in Model.Columns)
+                                        {
+                                            <th>@col</th>
+                                        }
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @foreach (var row in Model.Rows)
+                                    {
+                                        <tr>
+                                            @for (var ci = 0; ci < row.Count; ci++)
+                                            {
+                                                <td class="@(revenueColIndices.Contains(ci) ? "rev-m" : "")">@FormatCell(ci, row[ci])</td>
+                                            }
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+
+                @if (Model.ChartData != null)
+                {
+                    @* Chart View *@
+                    <div id="chartView" class="card border-0 shadow-sm mb-4 d-none">
+                        <div class="card-body">
+                            <div class="d-flex justify-content-end gap-2 mb-2">
+                                <label class="form-label mb-0 align-self-center small text-muted">Chart type:</label>
+                                <select class="form-select form-select-sm w-auto" id="chartTypeSelect" onchange="updateChartType(this.value)">
+                                    <option value="bar" selected="@(Model.ChartData.ChartType == "bar" ? "selected" : null)">Bar</option>
+                                    <option value="line" selected="@(Model.ChartData.ChartType == "line" ? "selected" : null)">Line</option>
+                                    <option value="pie" selected="@(Model.ChartData.ChartType == "pie" ? "selected" : null)">Pie</option>
+                                    <option value="doughnut" selected="@(Model.ChartData.ChartType == "doughnut" ? "selected" : null)">Doughnut</option>
+                                </select>
+                            </div>
+                            <div style="position:relative; height:400px;">
+                                <canvas id="analyticsChart"></canvas>
+                            </div>
+                        </div>
+                    </div>
+                }
+
+                @* Pivot Table View — always available, user-configurable *@
+                <div id="pivotView" class="card border-0 shadow-sm mb-4 d-none">
+                    <div class="card-header">
+                        <div class="d-flex flex-wrap align-items-center gap-2">
+                            <span class="fw-semibold me-2"><i class="bi bi-grid-3x3-gap-fill me-1 text-danger"></i>Pivot</span>
+                            <div class="d-flex gap-2 align-items-center small flex-wrap">
+                                <label class="mb-0 text-muted">Row:</label>
+                                <select id="pivotRowSel" class="form-select form-select-sm w-auto" onchange="renderPivot()">
+                                    @for (var i = 0; i < Model.Columns.Count; i++)
+                                    {
+                                        <option value="@i" selected="@(i == pivotRowColIdx ? "selected" : null)">@Model.Columns[i]</option>
+                                    }
+                                </select>
+                                <label class="mb-0 text-muted">Column:</label>
+                                <select id="pivotColSel" class="form-select form-select-sm w-auto" onchange="renderPivot()">
+                                    @for (var i = 0; i < Model.Columns.Count; i++)
+                                    {
+                                        <option value="@i" selected="@(i == pivotColColIdx ? "selected" : null)">@Model.Columns[i]</option>
+                                    }
+                                </select>
+                                <label class="mb-0 text-muted">Value:</label>
+                                <select id="pivotValSel" class="form-select form-select-sm w-auto" onchange="renderPivot()">
+                                    @for (var i = 0; i < Model.Columns.Count; i++)
+                                    {
+                                        <option value="@i" selected="@(i == pivotValColIdx ? "selected" : null)">@Model.Columns[i]</option>
+                                    }
+                                </select>
+                                <label class="mb-0 text-muted">Aggregate:</label>
+                                <select id="pivotAggSel" class="form-select form-select-sm w-auto" onchange="renderPivot()">
+                                    <option value="sum">Sum</option>
+                                    <option value="count">Count</option>
+                                    <option value="avg">Avg</option>
+                                    <option value="min">Min</option>
+                                    <option value="max">Max</option>
+                                </select>
+                                <span id="pivotChartTypeWrap" class="d-none d-flex gap-1 align-items-center">
+                                    <label class="mb-0 text-muted">Chart:</label>
+                                    <select id="pivotChartTypeSel" class="form-select form-select-sm w-auto" onchange="buildPivotChart(this.value)">
+                                        <option value="bar">Bar</option>
+                                        <option value="line">Line</option>
+                                        <option value="pie">Pie</option>
+                                        <option value="doughnut">Doughnut</option>
+                                    </select>
+                                </span>
+                            </div>
+                            <div class="ms-auto d-flex gap-2">
+                                <div class="btn-group btn-group-sm" role="group">
+                                    <button class="btn btn-primary active" id="pivotBtnTable" onclick="showPivotSubView('table')"><i class="bi bi-table me-1"></i>Table</button>
+                                    <button class="btn btn-outline-primary" id="pivotBtnChart" onclick="showPivotSubView('chart')"><i class="bi bi-bar-chart-fill me-1"></i>Chart</button>
+                                </div>
+                                <button class="btn btn-sm btn-outline-secondary" onclick="exportPivotCsv()">
+                                    <i class="bi bi-download me-1"></i>CSV
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="card-body p-0">
+                        <div class="table-responsive" id="pivotContainer"></div>
+                        <div id="pivotChartWrap" class="d-none p-3" style="position:relative;height:420px;">
+                            <canvas id="pivotChart"></canvas>
+                        </div>
+                    </div>
+                </div>
+            }
+            else if (!Model.HasError)
+            {
+                <div class="alert alert-warning" role="alert">
+                    <i class="bi bi-info-circle-fill me-1"></i> The query returned no results.
+                </div>
+            }
+
+        </div>
+    </div>
+</div>
+
+@section Scripts {
+    <script src="~/js/chart.js"></script>
+    <script>
+        // ── Chart setup ──────────────────────────────────────────────────────────
+        var chartData = @Html.Raw(chartJson);
+        var myChart = null;
+
+        function buildChart(type) {
+            if (!chartData) return;
+            var ctx = document.getElementById('analyticsChart').getContext('2d');
+            if (myChart) myChart.destroy();
+
+            var isPieFamily = type === 'pie' || type === 'doughnut';
+            var numDatasets = chartData.datasets.length;
+
+            var datasets = chartData.datasets.map(function (ds, dsIdx) {
+                // Pie/doughnut: one colour per slice (full array).
+                // Single-dataset bar: one colour per bar (full array for rainbow bars).
+                // Multi-dataset bar/line: one solid colour per dataset.
+                var bg = (isPieFamily || numDatasets === 1)
+                    ? ds.backgroundColor
+                    : ds.backgroundColor[dsIdx % ds.backgroundColor.length];
+                return {
+                    label: ds.label,
+                    data: ds.data,
+                    backgroundColor: bg,
+                    borderColor: ds.borderColor,
+                    borderWidth: ds.borderWidth,
+                    fill: false
+                };
+            });
+
+            myChart = new Chart(ctx, {
+                type: type,
+                data: { labels: chartData.labels, datasets: datasets },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: { legend: { position: 'top' } }
+                }
+            });
+        }
+
+        function updateChartType(type) {
+            buildChart(type);
+        }
+
+        // ── Raw data for pivot ───────────────────────────────────────────────────
+        var rawRows = @Html.Raw(JsonConvert.SerializeObject(
+            Model.Rows.Select(r => r.Select(v => v?.ToString()).ToList()).ToList()));
+
+        // ── View switching ───────────────────────────────────────────────────────
+        var VIEWS = ['table', 'chart', 'pivot'];
+
+        function showView(view) {
+            VIEWS.forEach(function(v) {
+                var el = document.getElementById(v + 'View');
+                var btn = document.getElementById('btn' + v.charAt(0).toUpperCase() + v.slice(1));
+                if (!el) return;
+                el.classList.toggle('d-none', v !== view);
+                if (btn) {
+                    btn.classList.toggle('active', v === view);
+                    btn.classList.toggle('btn-primary', v === view);
+                    btn.classList.toggle('btn-outline-primary', v !== view);
+                }
+            });
+
+            if (view === 'chart' && !myChart && chartData) {
+                buildChart(chartData.chartType);
+            }
+            if (view === 'pivot') {
+                renderPivot();
+            }
+        }
+
+        // ── Pivot sub-view toggle (Table | Chart) ────────────────────────────────
+        var _pivotSubView = 'table'; // 'table' | 'chart'
+        var _pivotChart   = null;
+
+        // Pulse360 brand palette (same as main chart colours)
+        var PIVOT_COLORS = [
+            '#E31837','#4a453d','#0A0838','#f3901d',
+            '#5F0229','#F8B4A3','#4D4D4F','#ffc06a','#808080','#C9CBCF'
+        ];
+
+        function showPivotSubView(sub) {
+            _pivotSubView = sub;
+            document.getElementById('pivotContainer').classList.toggle('d-none', sub !== 'table');
+            document.getElementById('pivotChartWrap').classList.toggle('d-none', sub !== 'chart');
+            document.getElementById('pivotChartTypeWrap').classList.toggle('d-none', sub !== 'chart');
+            document.getElementById('pivotBtnTable').classList.toggle('active', sub === 'table');
+            document.getElementById('pivotBtnTable').classList.toggle('btn-primary', sub === 'table');
+            document.getElementById('pivotBtnTable').classList.toggle('btn-outline-primary', sub !== 'table');
+            document.getElementById('pivotBtnChart').classList.toggle('active', sub === 'chart');
+            document.getElementById('pivotBtnChart').classList.toggle('btn-primary', sub === 'chart');
+            document.getElementById('pivotBtnChart').classList.toggle('btn-outline-primary', sub !== 'chart');
+            if (sub === 'chart' && _pivotLastState) {
+                buildPivotChart(document.getElementById('pivotChartTypeSel').value);
+            }
+        }
+
+        function buildPivotChart(type) {
+            if (!_pivotLastState) return;
+            var s = _pivotLastState;
+            var isPieFam = type === 'pie' || type === 'doughnut';
+
+            // Datasets: one per colKey; x-axis = rowKeys
+            var datasets = s.colKeys.map(function(ck, dsIdx) {
+                var colour = PIVOT_COLORS[dsIdx % PIVOT_COLORS.length];
+                var data   = s.rowKeys.map(function(rk) {
+                    var v = s.matrix[rk][ck];
+                    return (typeof v === 'number') ? v : 0;
+                });
+                var bg = isPieFam ? PIVOT_COLORS : colour;
+                return { label: ck, data: data, backgroundColor: bg, borderColor: colour, borderWidth: 1, fill: false };
+            });
+
+            // For Pie/Doughnut collapse all datasets into a single one (sum per row)
+            if (isPieFam) {
+                var merged = s.rowKeys.map(function(rk) {
+                    return s.colKeys.reduce(function(sum, ck) {
+                        var v = s.matrix[rk][ck];
+                        return sum + (typeof v === 'number' ? v : 0);
+                    }, 0);
+                });
+                datasets = [{ label: 'Total', data: merged,
+                    backgroundColor: PIVOT_COLORS.slice(0, s.rowKeys.length),
+                    borderWidth: 1 }];
+            }
+
+            var ctx = document.getElementById('pivotChart').getContext('2d');
+            if (_pivotChart) _pivotChart.destroy();
+            _pivotChart = new Chart(ctx, {
+                type: type,
+                data: { labels: s.rowKeys, datasets: datasets },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: { legend: { position: 'top' } },
+                    scales: isPieFam ? {} : { x: { stacked: false }, y: { beginAtZero: true } }
+                }
+            });
+        }
+
+
+
+        // ── Pivot table renderer ─────────────────────────────────────────────────
+        // Stores last rendered pivot matrix for CSV export and chart
+        var _pivotLastState = null;
+
+        function renderPivot() {
+            var rowColIdx = parseInt(document.getElementById('pivotRowSel').value);
+            var colColIdx = parseInt(document.getElementById('pivotColSel').value);
+            var valColIdx = parseInt(document.getElementById('pivotValSel').value);
+            var agg       = document.getElementById('pivotAggSel').value; // sum|count|avg|min|max
+
+            // Collect unique row/col keys (preserve insertion order)
+            var rowKeys = [], colKeys = [], seenR = {}, seenC = {};
+            rawRows.forEach(function(row) {
+                var rk = row[rowColIdx] != null ? String(row[rowColIdx]) : '(null)';
+                var ck = row[colColIdx] != null ? String(row[colColIdx]) : '(null)';
+                if (!seenR[rk]) { seenR[rk] = true; rowKeys.push(rk); }
+                if (!seenC[ck]) { seenC[ck] = true; colKeys.push(ck); }
+            });
+
+            // Build accumulator: rowKey → colKey → array of numeric values
+            var accum = {};
+            rowKeys.forEach(function(rk) { accum[rk] = {}; colKeys.forEach(function(ck) { accum[rk][ck] = []; }); });
+
+            rawRows.forEach(function(row) {
+                var rk = row[rowColIdx] != null ? String(row[rowColIdx]) : '(null)';
+                var ck = row[colColIdx] != null ? String(row[colColIdx]) : '(null)';
+                var v  = row[valColIdx];
+                var num = parseFloat(v);
+                accum[rk][ck].push(isNaN(num) ? v : num);
+            });
+
+            // Apply aggregation function
+            function aggregate(vals) {
+                if (vals.length === 0) return '—';
+                var nums = vals.filter(function(v) { return typeof v === 'number'; });
+                if (agg === 'count') return vals.length;
+                if (nums.length === 0) return vals[vals.length - 1]; // non-numeric: last value
+                if (agg === 'sum') return nums.reduce(function(a,b){return a+b;},0);
+                if (agg === 'avg') { var s=nums.reduce(function(a,b){return a+b;},0); return Math.round(s/nums.length*100)/100; }
+                if (agg === 'min') return Math.min.apply(null,nums);
+                if (agg === 'max') return Math.max.apply(null,nums);
+                return nums[nums.length-1];
+            }
+
+            // Build final matrix
+            var matrix = {};
+            rowKeys.forEach(function(rk) {
+                matrix[rk] = {};
+                colKeys.forEach(function(ck) { matrix[rk][ck] = aggregate(accum[rk][ck]); });
+            });
+
+            // Save for CSV export
+            _pivotLastState = { rowKeys: rowKeys, colKeys: colKeys, matrix: matrix };
+
+            // Row totals (only meaningful for numeric agg)
+            var showTotals = (agg !== 'count' || true); // always show count totals
+
+            // ── Render HTML ──────────────────────────────────────────────────────
+            var html = '<table class="table table-bordered table-sm table-hover mb-0 pivot-tbl">';
+            html += '<thead class="table-dark"><tr>';
+            html += '<th class="pivot-dim-label">' + esc(document.getElementById('pivotRowSel').options[rowColIdx] ? document.getElementById('pivotRowSel').options[rowColIdx].text : '') + ' \\ ' + esc(document.getElementById('pivotColSel').options[colColIdx] ? document.getElementById('pivotColSel').options[colColIdx].text : '') + '</th>';
+            colKeys.forEach(function(ck) { html += '<th class="text-center">' + esc(ck) + '</th>'; });
+            html += '<th class="text-center table-warning pivot-total-hdr">Total</th>';
+            html += '</tr></thead><tbody>';
+
+            var colTotals = {};
+            colKeys.forEach(function(ck) { colTotals[ck] = []; });
+            var grandVals = [];
+
+            rowKeys.forEach(function(rk) {
+                html += '<tr><th class="table-secondary">' + esc(rk) + '</th>';
+                var rowVals = [];
+                colKeys.forEach(function(ck) {
+                    var val = matrix[rk][ck];
+                    var disp = (val === '—' || val === undefined) ? '—' : val;
+                    html += '<td class="text-end">' + esc(String(disp)) + '</td>';
+                    if (typeof val === 'number') { rowVals.push(val); colTotals[ck].push(val); grandVals.push(val); }
+                    else if (val !== '—' && val !== undefined) { colTotals[ck].push(val); }
+                });
+                var rowTotal = rowVals.length ? aggregate(rowVals) : '—';
+                html += '<td class="text-end fw-bold table-warning">' + esc(String(rowTotal)) + '</td>';
+                html += '</tr>';
+            });
+
+            // Grand total row
+            html += '<tr class="table-warning fw-bold"><th>Grand Total</th>';
+            var grandRowVals = [];
+            colKeys.forEach(function(ck) {
+                var ct = aggregate(colTotals[ck]);
+                if (typeof ct === 'number') grandRowVals.push(ct);
+                html += '<td class="text-end">' + esc(String(ct)) + '</td>';
+            });
+            var grandTotal = grandRowVals.length ? aggregate(grandRowVals) : '—';
+            html += '<td class="text-end">' + esc(String(grandTotal)) + '</td>';
+            html += '</tr>';
+
+            html += '</tbody></table>';
+            document.getElementById('pivotContainer').innerHTML = html;
+
+            // Auto-refresh chart if chart sub-view is currently active
+            if (_pivotSubView === 'chart') {
+                buildPivotChart(document.getElementById('pivotChartTypeSel').value);
+            }
+        }
+
+        // ── Pivot CSV export ─────────────────────────────────────────────────────
+        function exportPivotCsv() {
+            if (!_pivotLastState) return;
+            var s = _pivotLastState;
+            var lines = [];
+            // Header
+            lines.push([''].concat(s.colKeys).concat(['Total']).map(csvQ).join(','));
+            // Rows
+            s.rowKeys.forEach(function(rk) {
+                var nums = [];
+                var cells = s.colKeys.map(function(ck) {
+                    var v = s.matrix[rk][ck];
+                    if (typeof v === 'number') nums.push(v);
+                    return csvQ(v === '—' || v == null ? '' : String(v));
+                });
+                var rowTotal = nums.length ? nums.reduce(function(a,b){return a+b;},0) : '';
+                lines.push([csvQ(rk)].concat(cells).concat([csvQ(String(rowTotal))]).join(','));
+            });
+            // Grand total
+            var colTotStr = s.colKeys.map(function(ck) {
+                var vals = s.rowKeys.map(function(rk){ return s.matrix[rk][ck]; }).filter(function(v){return typeof v==='number';});
+                return csvQ(vals.length ? String(vals.reduce(function(a,b){return a+b;},0)) : '');
+            });
+            lines.push([csvQ('Grand Total')].concat(colTotStr).concat(['']).join(','));
+
+            var blob = new Blob([lines.join('\r\n')], {type:'text/csv'});
+            var a = document.createElement('a'); a.href = URL.createObjectURL(blob);
+            a.download = 'pivot.csv'; a.click();
+        }
+
+        function csvQ(v) { return '"' + String(v).replace(/"/g,'""') + '"'; }
+
+        function esc(s) {
+            return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+        }
+
+        // ── Copy SQL ─────────────────────────────────────────────────────────────
+        function copyToClipboard() {
+            var code = document.getElementById('sqlCode').innerText;
+            navigator.clipboard.writeText(code).then(function () {
+                var btn = document.getElementById('copySqlBtn');
+                btn.textContent = 'Copied!';
+                setTimeout(function () { btn.textContent = 'Copy'; }, 2000);
+            });
+        }
+    </script>
+}
