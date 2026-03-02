@@ -40,10 +40,13 @@
                             <p class="text-muted small mb-1">Try asking:</p>
                             @foreach (var suggestion in new[]
                             {
-                                "Show me the top 10 customers by revenue",
-                                "What are the total sales per month this year?",
-                                "List all products with stock below 50 units",
-                                "Which region has the highest number of orders?"
+                                "Show me accounts where a specific customer KPI is not met for 3 months in a row",
+                                "Show me accounts where Service Level is below 60% for any month",
+                                "Show me accounts where AHT for Customer Service process is more than 800 seconds",
+                                "Show me accounts where Revenue is behind by 20% or more from target",
+                                "Show me accounts where EBITDA is more than 2% points behind target",
+                                "Show me accounts where attrition is higher than 8% for the month January and year 2025-2026",
+                                "Show me accounts where attrition for advisors below 6 month tenure is higher than 10% for the month January and year 2025-2026"
                             })
                             {
                                 <div class="col-auto">

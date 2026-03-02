@@ -45,16 +45,74 @@ public class AzureOpenAIQueryGeneratorService : IQueryGeneratorService
             "columns into one name (e.g. if the schema has 'Month' and 'FY' as separate columns, you must " +
             "NEVER write 'FY_Year' — they are two different columns). Check the exact column names in the " +
             "schema before writing the query.\n" +
+            "- Every column name and table name in the generated SQL MUST be enclosed in square brackets, e.g. [ColumnName].\n" +
+            "- Use the NULLIF function in any denominator to avoid divide-by-zero errors, e.g. NULLIF([Denominator], 0).\n" +
+            "- Always format percentages to two decimal places.\n" +
+            "- For 'account name' or 'customer name' always use the column [Customer Name as per MIS].\n" +
+            "- When filtering or searching on [KPI_Name], always use the LIKE clause (e.g. [KPI_Name] LIKE '%AHT%').\n" +
+            "- When applying any condition on the [Actual] column, cast it using TRY_CAST(REPLACE([Actual], '%', '') AS float). Never use a column called ActualScore.\n" +
+            "- When applying any condition on the [Target] column, cast it using TRY_CAST(REPLACE([Target], '%', '') AS float).\n" +
+            "- For customer KPI or KPI trend queries, use table [tbl_ExecutiveSummaryDashboard] INNER JOIN [tbl_Project_Mapping] AS b ON a.[Mapping_Id] = b.[Mapping_Id].\n" +
+            "- For operation KPI queries, use table [tbl_OperationDashboard] INNER JOIN [tbl_Project_Mapping] AS b ON a.[Mapping_Id] = b.[Mapping_Id].\n" +
+            "- For finance-related queries (revenue, EBITDA, billing, projection), use table [tbl_Projection] INNER JOIN [tbl_Project_Mapping] AS b ON a.[Mapping_Id] = b.[Mapping_Id].\n" +
+            "- For attrition-related queries, use table [tbl_People_Attrition_Flat] and apply GROUP BY on every non-aggregated column used in the SELECT.\n" +
+            "- For 'KPI not met for 3 months in a row' or consecutive failure queries, use the column [Con_PassFail] = 'Fail'; do NOT apply any other window-function logic to determine consecutive months.\n" +
             "- If the question cannot be answered with the available schema, set \"sql\" to \"\" and explain in \"interpretation\".\n\n" +
             "Example response:\n" +
-            "{\"sql\": \"SELECT TOP 10 AccountName, TotalOrders FROM Customers ORDER BY TotalOrders DESC\", " +
+            "{\"sql\": \"SELECT TOP 10 [AccountName], [TotalOrders] FROM [Customers] ORDER BY [TotalOrders] DESC\", " +
             "\"interpretation\": \"These are the top 10 accounts by number of orders.\"}";
+
+        // Few-shot examples — ground the model with real domain Q→SQL pairs
+        var fewShotPairs = new (string Question, string SqlAnswer)[]
+        {
+            (
+                "Show me accounts where a specific customer KPI is not met for 3 months in a row",
+                "SELECT [Year], [MonthName], [Customer Name as per MIS] AS [AccountName], [KPI_Name] " +
+                "FROM [tbl_ExecutiveSummaryDashboard] AS a " +
+                "INNER JOIN [tbl_Project_Mapping] AS b ON a.[Mapping_Id] = b.[Mapping_Id] " +
+                "WHERE [Con_PassFail] = 'Fail'"
+            ),
+            (
+                "Show me accounts where Service Level is below 60% for any month",
+                "SELECT [Customer Name as per MIS] AS [Account], [MonthName], [MonthSeq], [Target], [Actual], [KPI_Name], [KPI_Status] " +
+                "FROM [dbo].[tbl_OperationDashboard] AS a " +
+                "INNER JOIN [tbl_Project_Mapping] AS b ON a.[Mapping_Id] = b.[Mapping_Id] " +
+                "WHERE [KPI_Name] LIKE '%Service Level%' " +
+                "AND TRY_CAST(REPLACE([Actual], '%', '') AS float) < 60"
+            ),
+            (
+                "Show me accounts where AHT for Customer Service process is more than 800 seconds",
+                "SELECT [Customer Name as per MIS] AS [Account], [MonthName], [MonthSeq], [Target], [Actual], [KPI_Name], [KPI_Status] " +
+                "FROM [dbo].[tbl_ExecutiveSummaryDashboard] AS a " +
+                "INNER JOIN [tbl_Project_Mapping] AS b ON a.[Mapping_Id] = b.[Mapping_Id] " +
+                "WHERE [KPI_Name] LIKE '%AHT%' " +
+                "AND TRY_CAST(REPLACE([Actual], '%', '') AS float) > 800"
+            ),
+            (
+                "Show me accounts where attrition is higher than 8% for the month January and year 2025-2026",
+                "SELECT [Customer Name as per MIS] AS [AccountName], [Delivery_IBG_Description], [FY], [MonthName], [MonthPercentage] " +
+                "FROM [dbo].[tbl_People_Attrition_Flat] AS a " +
+                "WHERE TRY_CAST(REPLACE([MonthPercentage], '%', '') AS float) > 8 " +
+                "AND [MonthName] = 'Jan' AND [FY] = '2025-2026'"
+            )
+        };
 
         var messages = new List<ChatMessage>
         {
-            new SystemChatMessage(systemPrompt),
-            new UserChatMessage(naturalLanguageQuery)
+            new SystemChatMessage(systemPrompt)
         };
+
+        // Inject few-shot pairs as alternating user/assistant messages
+        foreach (var (question, sql) in fewShotPairs)
+        {
+            messages.Add(new UserChatMessage(question));
+            messages.Add(new AssistantChatMessage(
+                $"{{\"sql\": \"{sql.Replace("\"", "\\\"")}\", " +
+                "\"interpretation\": \"Query generated based on domain rules.\"}}"));
+        }
+
+        // Actual user question
+        messages.Add(new UserChatMessage(naturalLanguageQuery));
 
         _logger.LogInformation("Calling Azure OpenAI for query: {Query}", naturalLanguageQuery);
 
